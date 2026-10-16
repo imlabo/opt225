@@ -1,0 +1,40 @@
+name: JPX discover
+
+# JPX のページ構成・ファイル形式の調査用(結果は jpx-discover ブランチに保存)
+on:
+  workflow_dispatch:
+    inputs:
+      args:
+        description: "開始 URL やファイル URL(空白区切り, 省略可)"
+        required: false
+      fetch:
+        description: "そのまま保存するファイル URL(空白区切り, 省略可)"
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npx tsx scripts/jpx-discover.mts ${{ inputs.args }}
+      - name: Fetch raw files
+        if: inputs.fetch != ''
+        run: |
+          mkdir -p out/files
+          for u in ${{ inputs.fetch }}; do curl -sSL -A "Mozilla/5.0 (compatible; opt225/1.0)" -o "out/files/$(basename "$u")" "$u"; done
+          cd out/files && for f in *; do
+            case "$f" in *.zip) unzip -o -q "$f" -d "${f%.zip}" ;; esac
+          done; ls -laR | head -100
+      - name: Save to jpx-discover branch
+        if: always()
+        run: |
+          cp -r out /tmp/out
+          git config user.name github-actions && git config user.email github-actions@users.noreply.github.com
+          git checkout --orphan jpx-discover && git rm -rfq . && git clean -fdxq
+          cp -r /tmp/out/. . && git add -A && git commit -qm "JPX discover $(date -u +%FT%TZ)" && git push -f origin jpx-discover

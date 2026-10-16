@@ -18,6 +18,7 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
       - run: npm ci
+      - run: sudo apt-get install -y -qq poppler-utils >/dev/null
       - run: npx tsx scripts/jpx-check.mts 2>&1 | tee jpx-check.txt; exit ${PIPESTATUS[0]}
       - name: Save result to jpx-check branch
         if: always()

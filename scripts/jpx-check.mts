@@ -15,6 +15,15 @@ const allHrefs = [...html.matchAll(/href="([^"]+)"/g)].map((m) => m[1]).filter((
 console.log(`== index: ${indexUrl}\n== file links on page: ${allHrefs.length}`);
 for (const h of allHrefs) console.log("  ", h);
 
+for (const sub of ["01.html", "02.html", "03.html"]) {
+  const u = new URL(sub, indexUrl).toString();
+  const h = await (await fetch(u, { headers: { "User-Agent": UA } })).text();
+  const t = h.match(/<title>([^<]*)/)?.[1];
+  const l = extractWeeklyLinks(h, u);
+  console.log(`\n== sub page ${sub}: ${t} / weekly csv: ${l.length}`, l.length ? `${l[l.length - 1].split("/").pop()} .. ${l[0].split("/").pop()}` : "");
+  console.log("   other files:", [...new Set([...h.matchAll(/href="([^"]+\.(?:csv|zip|xlsx?))"/g)].map((m) => m[1].split("/").pop()))].slice(0, 12).join(" "));
+}
+
 const links = extractWeeklyLinks(html, indexUrl);
 console.log(`\n== extracted weekly links: ${links.length}`);
 for (const l of links) console.log("  ", l, JSON.stringify(weekFromFileName(l)));
@@ -49,9 +58,9 @@ if (pdfHref) {
 }
 
 try {
-  const flows = parseWeeklyCsv(text);
-  console.log(`\n== parsed rows: ${flows.length}`);
-  console.table(flows);
+  const parsed = parseWeeklyCsv(text);
+  console.log(`\n== parsed: ${parsed.weekStart}..${parsed.weekEnd}, ${parsed.flows.length} rows`);
+  console.table(parsed.flows);
 } catch (e) {
   console.log("parse error:", e);
 }

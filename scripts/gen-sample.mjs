@@ -13,7 +13,7 @@ for (let w = 29; w >= 0; w--) {
   for (const [k, base] of Object.entries(inv)) for (const p of ["call", "put", "fut"]) {
     const vol = Math.round(base * (p === "fut" ? 0.4 : 1) * (0.8 + rnd() * 0.4));
     const tilt = (k === "individual" ? -drift : drift) * 0.04 + (rnd() - 0.5) * 0.04 + (k === "individual" && p !== "fut" ? 0.02 : 0);
-    out.push(`INSERT OR REPLACE INTO flows VALUES ('${d(e)}','${p}','${k}',${Math.round(vol * (1 + tilt))},${Math.round(vol * (1 - tilt))});`);
+    out.push(`INSERT OR REPLACE INTO flows (week_end, product, investor, sell, buy) VALUES ('${d(e)}','${p}','${k}',${Math.round(vol * (1 + tilt))},${Math.round(vol * (1 - tilt))});`);
   }
 }
 console.log(out.join("\n"));

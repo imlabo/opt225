@@ -14,9 +14,9 @@ export async function saveWeek(env: Env, w: WeekData) {
     ).bind(w.weekEnd, w.weekStart, w.sourceUrl ?? null, w.isSample ? 1 : 0),
     env.DB.prepare("DELETE FROM flows WHERE week_end = ?").bind(w.weekEnd),
     ...w.flows.map((f) =>
-      env.DB.prepare("INSERT INTO flows (week_end, product, investor, sell, buy) VALUES (?, ?, ?, ?, ?)").bind(
-        w.weekEnd, f.product, f.investor, Math.round(f.sell), Math.round(f.buy),
-      ),
+      env.DB.prepare(
+        "INSERT INTO flows (week_end, product, investor, sell, buy, sell_value, buy_value) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      ).bind(w.weekEnd, f.product, f.investor, Math.round(f.sell), Math.round(f.buy), f.sellValue ?? null, f.buyValue ?? null),
     ),
   ];
   await env.DB.batch(stmts);
@@ -30,12 +30,15 @@ export async function loadHistory(env: Env, upTo?: string, limit = 60): Promise<
   const list = weeks.results.reverse();
   if (list.length === 0) return [];
   const flows = await env.DB.prepare(
-    `SELECT week_end, product, investor, sell, buy FROM flows WHERE week_end >= ? AND week_end <= ?`,
-  ).bind(list[0].week_end, list[list.length - 1].week_end).all<FlowRow & { week_end: string }>();
+    `SELECT week_end, product, investor, sell, buy, sell_value, buy_value FROM flows WHERE week_end >= ? AND week_end <= ?`,
+  ).bind(list[0].week_end, list[list.length - 1].week_end).all<{ week_end: string; product: string; investor: string; sell: number; buy: number; sell_value: number | null; buy_value: number | null }>();
   const byWeek = new Map<string, FlowRow[]>();
   for (const r of flows.results) {
     const arr = byWeek.get(r.week_end) ?? [];
-    arr.push({ product: r.product as Product, investor: r.investor as Investor, sell: r.sell, buy: r.buy });
+    arr.push({
+      product: r.product as Product, investor: r.investor as Investor, sell: r.sell, buy: r.buy,
+      sellValue: r.sell_value ?? undefined, buyValue: r.buy_value ?? undefined,
+    });
     byWeek.set(r.week_end, arr);
   }
   return list.map((w) => ({

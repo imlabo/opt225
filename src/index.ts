@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { loadAnalyses, loadHistory } from "./db";
-import { parseWorkbook } from "./jpx";
+import { decodeJpx, parseWeeklyCsv } from "./jpx";
 import { analyzeAndPost, ingestManual, runPipeline } from "./pipeline";
 import { renderPage } from "./page";
 import { INVESTORS, type Env, type WeekData } from "./types";
@@ -42,8 +42,8 @@ app.post("/admin/ingest", async (c) => {
   return c.json(c.req.query("post") === "1" ? await analyzeAndPost(c.env) : { ok: true });
 });
 
-/** Excel をアップロードして解析結果だけ確認(保存しない) */
-app.post("/admin/parse-preview", async (c) => c.json(parseWorkbook(await c.req.arrayBuffer())));
+/** JPX の週次 CSV をボディで送って解析結果だけ確認(保存しない) */
+app.post("/admin/parse-preview", async (c) => c.json(parseWeeklyCsv(decodeJpx(await c.req.arrayBuffer()))));
 
 app.post("/admin/clear-sample", async (c) => {
   await c.env.DB.prepare("DELETE FROM weeks WHERE is_sample = 1").run();

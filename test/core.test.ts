@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { analyze } from "../src/analysis";
-import { extractWeeklyLinks, parseRows, weekFromFileName } from "../src/jpx";
+import { decodeJpx, extractWeeklyLinks, parseWeeklyCsv, weekFromFileName } from "../src/jpx";
 import { composeTweet, oauthHeader, weightedLength } from "../src/x";
 import type { WeekData } from "../src/types";
 
@@ -20,40 +20,41 @@ describe("OAuth 1.0a", () => {
   });
 });
 
+// 2026-10-05〜09 週の実データ抜粋(PDF 版と突合済み)
+const CSV = `"帳票種別 Product type","サイクル区分 Cycle","年月週 Year, Month, Week","報告年月日（自）Period covered - from","報告年月日（至）Period covered - to","投資部門コード Type of Investor","数量金額区分 Volume/Value","売 Sales","売-差引 Balance","買 Purchases","買-差引 Balance","合計 Total"
+"301","1","2026101","20261005","20261009","11","1",20654,-2,20652,0,41306
+"301","1","2026101","20261005","20261009","51","1",12980,0,13892,912,26872
+${[["11", 19229, 20494], ["21", 0, 0], ["22", 1127, 3000], ["23", 65, 40], ["24", 0, 0], ["31", 0, 50], ["32", 788, 1485], ["33", 223, 215], ["41", 330, 350], ["51", 21172, 18377], ["60", 123328, 123651]]
+  .map(([k, s, b]) => `"303","1","2026101","20261005","20261009","${k}","1",${s},0,${b},0,${Number(s) + Number(b)}`).join("\n")}
+"303","1","2026101","20261005","20261009","51","2",2257712750,-414614850,1843097900,0,4100810650
+"304","1","2026101","20261005","20261009","51","1",18739,0,19403,664,38142
+"332","1","2026101","20261005","20261009","51","1",41678,-6224,35454,0,77132
+`;
+
 describe("JPX parser", () => {
-  it("parses single-row layout", () => {
-    const rows = [
-      ["日経225先物"], ["区分", "売り", "買い"], ["個人", 1000, 1200], ["法人", 500, 400],
-      ["日経225mini"], ["個人", 99999, 1],
-      ["日経225オプション プット"], ["区分", "売り", "買い"], ["自己計", 9, 9], ["法人", 3000, 3500], ["個人", "12,000", "10,000"], ["海外投資家", 50000, 52000],
-      ["日経225オプション コール"], ["個人", 8000, 9000], ["法人", 2000, 1500],
-      ["TOPIX先物"], ["個人", 7, 7],
-    ];
-    const r = parseRows(rows);
-    const get = (p: string, i: string) => r.find((x) => x.product === p && x.investor === i);
-    expect(get("fut", "individual")).toMatchObject({ sell: 1000, buy: 1200 });
-    expect(get("put", "individual")).toMatchObject({ sell: 12000, buy: 10000 });
-    expect(get("put", "corporate")).toMatchObject({ sell: 3000, buy: 3500 });
-    expect(get("call", "individual")).toMatchObject({ sell: 8000, buy: 9000 });
-    expect(get("call", "corporate")).toMatchObject({ sell: 2000, buy: 1500 });
-    expect(get("put", "proprietary")).toMatchObject({ sell: 9, buy: 9 });
-    expect(r.length).toBe(8);
+  it("parses weekly CSV by product / investor codes", () => {
+    const r = parseWeeklyCsv(CSV);
+    expect(r.weekStart).toBe("2026-10-05");
+    expect(r.weekEnd).toBe("2026-10-09");
+    const get = (p: string, i: string) => r.flows.find((x) => x.product === p && x.investor === i);
+    // PDF: 日経225オプションプット 法人 売 2,203 / 買 4,790、個人 21,172 / 18,377、海外 123,328 / 123,651
+    expect(get("put", "corporate")).toMatchObject({ sell: 2203, buy: 4790 });
+    expect(get("put", "individual")).toMatchObject({ sell: 21172, buy: 18377, sellValue: 2257712750, buyValue: 1843097900 });
+    expect(get("put", "foreign")).toMatchObject({ sell: 123328, buy: 123651 });
+    expect(get("put", "proprietary")).toMatchObject({ sell: 19229, buy: 20494 });
+    expect(get("call", "individual")).toMatchObject({ sell: 18739, buy: 19403 });
+    expect(get("fut", "individual")).toMatchObject({ sell: 12980, buy: 13892 });
+    expect(r.flows.length).toBe(8); // mini オプション(332)は除外
   });
-  it("parses two-row layout", () => {
-    const rows = [["日経225オプション"], ["プット"], ["個人", "売り", 100], ["", "買い", 80], ["コール"], ["個人", "売り", 50], ["", "買い", 70]];
-    const r = parseRows(rows);
-    expect(r).toContainEqual({ product: "put", investor: "individual", sell: 100, buy: 80 });
-    expect(r).toContainEqual({ product: "call", investor: "individual", sell: 50, buy: 70 });
+  it("extracts weekly CSV links newest first", () => {
+    const html = `<a href="a-att/Tousi_DV_pdf_W_20261005_20261009.pdf"></a><a href="a-att/Tousi_DV_W_20261005_20261009.csv"></a><a href="b-att/Tousi_DV_W_20260928_20261002.csv"></a><a href="c-att/Tategyoku_W_20260413_20260417.xlsx"></a>`;
+    const links = extractWeeklyLinks(html, "https://www.jpx.co.jp/x/");
+    expect(links).toEqual(["https://www.jpx.co.jp/x/a-att/Tousi_DV_W_20261005_20261009.csv", "https://www.jpx.co.jp/x/b-att/Tousi_DV_W_20260928_20261002.csv"]);
+    expect(weekFromFileName(links[0])).toEqual({ weekStart: "2026-10-05", weekEnd: "2026-10-09" });
   });
-  it("extracts links and weeks", () => {
-    const html = `<a href="/x/abc-att/Tousi_DV_W_202609_4_0921_0925.xls">a</a><a href="/x/def-att/Tousi_DV_W_202610_1_0928_1002.xls">b</a><a href="/y.pdf">c</a>`;
-    const links = extractWeeklyLinks(html, "https://www.jpx.co.jp/markets/statistics-derivatives/sector/index.html");
-    expect(links[0]).toBe("https://www.jpx.co.jp/x/def-att/Tousi_DV_W_202610_1_0928_1002.xls");
-    expect(weekFromFileName(links[0])).toEqual({ weekStart: "2026-09-28", weekEnd: "2026-10-02" });
-    const cur = extractWeeklyLinks(`<a href="a-att/Tousi_DV_pdf_W_20261005_20261009.pdf"></a><a href="a-att/Tousi_DV_W_20261005_20261009.csv"></a><a href="b-att/Tousi_DV_W_20260928_20261002.csv"></a><a href="c-att/Tategyoku_W_20260413_20260417.xlsx"></a>`, "https://www.jpx.co.jp/x/");
-    expect(cur).toEqual(["https://www.jpx.co.jp/x/a-att/Tousi_DV_W_20261005_20261009.csv", "https://www.jpx.co.jp/x/b-att/Tousi_DV_W_20260928_20261002.csv"]);
-    expect(weekFromFileName(cur[0])).toEqual({ weekStart: "2026-10-05", weekEnd: "2026-10-09" });
-    expect(weekFromFileName("Tousi_DV_W_202612_5_1228_0101.xls")).toEqual({ weekStart: "2026-12-28", weekEnd: "2027-01-01" });
+  it("decodes Shift_JIS", () => {
+    const sjis = new Uint8Array([0x93, 0xfa, 0x8c, 0x6f]); // "日経"
+    expect(decodeJpx(sjis.buffer)).toBe("日経");
   });
 });
 

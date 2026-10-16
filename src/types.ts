@@ -13,8 +13,10 @@ export const INVESTOR_LABEL: Record<Investor, string> = {
 export interface FlowRow {
   product: Product;
   investor: Investor;
-  sell: number;
+  sell: number; // 数量(枚)
   buy: number;
+  sellValue?: number; // 金額(円, オプションはプレミアム代金)
+  buyValue?: number;
 }
 
 export interface WeekData {

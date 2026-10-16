@@ -1,0 +1,22 @@
+name = "nikkei-option-flow"
+main = "src/index.ts"
+compatibility_date = "2026-09-01"
+compatibility_flags = ["nodejs_compat"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "nikkei-option-flow"
+database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+migrations_dir = "migrations"
+
+# JPX は投資部門別取引状況(週間)を原則 第4営業日(木曜)15:00 JST 頃に公表。
+# 木・金の 16:30 JST(07:30 UTC) に取得→分析→X投稿。取得済みの週はスキップされる(冪等)。
+[triggers]
+crons = ["30 7 * * 4,5"]
+
+[vars]
+SITE_URL = "https://nikkei-option-flow.example.workers.dev"
+JPX_INDEX_URL = "https://www.jpx.co.jp/markets/statistics-derivatives/sector/index.html"
+X_POST_ENABLED = "false"
+# Secrets (wrangler secret put):
+#   ADMIN_TOKEN, X_API_KEY, X_API_SECRET, X_ACCESS_TOKEN, X_ACCESS_SECRET

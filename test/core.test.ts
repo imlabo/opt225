@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { analyze } from "../src/analysis";
-import { extractExcelLinks, parseRows, weekFromFileName } from "../src/jpx";
+import { extractWeeklyLinks, parseRows, weekFromFileName } from "../src/jpx";
 import { composeTweet, oauthHeader, weightedLength } from "../src/x";
 import type { WeekData } from "../src/types";
 
@@ -47,9 +47,12 @@ describe("JPX parser", () => {
   });
   it("extracts links and weeks", () => {
     const html = `<a href="/x/abc-att/Tousi_DV_W_202609_4_0921_0925.xls">a</a><a href="/x/def-att/Tousi_DV_W_202610_1_0928_1002.xls">b</a><a href="/y.pdf">c</a>`;
-    const links = extractExcelLinks(html, "https://www.jpx.co.jp/markets/statistics-derivatives/sector/index.html");
+    const links = extractWeeklyLinks(html, "https://www.jpx.co.jp/markets/statistics-derivatives/sector/index.html");
     expect(links[0]).toBe("https://www.jpx.co.jp/x/def-att/Tousi_DV_W_202610_1_0928_1002.xls");
     expect(weekFromFileName(links[0])).toEqual({ weekStart: "2026-09-28", weekEnd: "2026-10-02" });
+    const cur = extractWeeklyLinks(`<a href="a-att/Tousi_DV_pdf_W_20261005_20261009.pdf"></a><a href="a-att/Tousi_DV_W_20261005_20261009.csv"></a><a href="b-att/Tousi_DV_W_20260928_20261002.csv"></a><a href="c-att/Tategyoku_W_20260413_20260417.xlsx"></a>`, "https://www.jpx.co.jp/x/");
+    expect(cur).toEqual(["https://www.jpx.co.jp/x/a-att/Tousi_DV_W_20261005_20261009.csv", "https://www.jpx.co.jp/x/b-att/Tousi_DV_W_20260928_20261002.csv"]);
+    expect(weekFromFileName(cur[0])).toEqual({ weekStart: "2026-10-05", weekEnd: "2026-10-09" });
     expect(weekFromFileName("Tousi_DV_W_202612_5_1228_0101.xls")).toEqual({ weekStart: "2026-12-28", weekEnd: "2027-01-01" });
   });
 });

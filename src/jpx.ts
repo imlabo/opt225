@@ -14,34 +14,66 @@ const UA = "Mozilla/5.0 (compatible; opt225/1.0)";
 export async function discoverLatestFiles(indexUrl: string): Promise<string[]> {
   const res = await fetch(indexUrl, { headers: { "User-Agent": UA } });
   if (!res.ok) throw new Error(`JPX index HTTP ${res.status}`);
-  const html = await res.text();
-  return extractExcelLinks(html, indexUrl);
+  return extractWeeklyLinks(await res.text(), indexUrl);
 }
 
-export function extractExcelLinks(html: string, baseUrl: string): string[] {
+/**
+ * 週次「投資部門別取引状況」ファイルのリンクを新しい順に返す。
+ *   現行: Tousi_DV_W_20261005_20261009.csv
+ *   旧  : Tousi_DV_W_202610_1_1005_1009.xls
+ * PDF 版 (Tousi_DV_pdf_W_...) と建玉表 (Tategyoku_W_...) は対象外。
+ */
+export function extractWeeklyLinks(html: string, baseUrl: string): string[] {
   const links = new Set<string>();
-  for (const m of html.matchAll(/href="([^"]+\.xlsx?)"/gi)) {
-    const href = m[1];
-    // 週間・デリバティブのファイル(例: Tousi_DV_W_YYYYMM_N_MMDD_MMDD.xls)を優先
-    if (/DV_W|dv_w|week/i.test(href) || /-att\//.test(href)) links.add(new URL(href, baseUrl).toString());
-  }
-  // ファイル名中の日付が新しい順
-  return [...links].sort((a, b) => fileKey(b).localeCompare(fileKey(a)));
+  for (const m of html.matchAll(/href="([^"]*Tousi_DV_W_[^"]+\.(?:csv|xlsx?))"/gi)) links.add(new URL(m[1], baseUrl).toString());
+  const key = (u: string) => weekFromFileName(u)?.weekEnd ?? "";
+  // 同じ週に CSV と Excel がある場合は CSV を優先
+  return [...links].sort((a, b) => key(b).localeCompare(key(a)) || (b.endsWith(".csv") ? 1 : 0) - (a.endsWith(".csv") ? 1 : 0));
 }
 
-function fileKey(url: string): string {
-  const m = url.match(/(\d{6})_\d_(\d{4})_(\d{4})/);
-  return m ? `${m[1]}${m[3]}` : url;
-}
-
-/** ファイル名から週の開始・終了日を推定 (Tousi_DV_W_202610_1_1005_1009 → 2026-10-05..2026-10-09) */
+/** ファイル名から週の開始・終了日を推定 */
 export function weekFromFileName(url: string): { weekStart: string; weekEnd: string } | null {
+  const d8 = url.match(/_(\d{4})(\d{2})(\d{2})_(\d{4})(\d{2})(\d{2})\.\w+$/);
+  if (d8) return { weekStart: `${d8[1]}-${d8[2]}-${d8[3]}`, weekEnd: `${d8[4]}-${d8[5]}-${d8[6]}` };
   const m = url.match(/(\d{4})(\d{2})_\d_(\d{2})(\d{2})_(\d{2})(\d{2})/);
   if (!m) return null;
   const [, y, , sm, sd, em, ed] = m;
   const year = Number(y);
   const endYear = Number(em) < Number(sm) ? year + 1 : year;
   return { weekStart: `${year}-${sm}-${sd}`, weekEnd: `${endYear}-${em}-${ed}` };
+}
+
+/** JPX の CSV は Shift_JIS のことが多い。UTF-8 として不正なら Shift_JIS で読む */
+export function decodeJpx(buf: ArrayBuffer): string {
+  try {
+    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(buf).replace(/^\uFEFF/, "");
+  } catch {
+    return new TextDecoder("shift_jis").decode(buf);
+  }
+}
+
+export function parseCsv(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [], cell = "", q = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (q) {
+      if (ch === '"' && text[i + 1] === '"') { cell += '"'; i++; }
+      else if (ch === '"') q = false;
+      else cell += ch;
+    } else if (ch === '"') q = true;
+    else if (ch === ",") { row.push(cell); cell = ""; }
+    else if (ch === "\n" || ch === "\r") {
+      if (ch === "\r" && text[i + 1] === "\n") i++;
+      row.push(cell); rows.push(row); row = []; cell = "";
+    } else cell += ch;
+  }
+  if (cell || row.length) { row.push(cell); rows.push(row); }
+  return rows;
+}
+
+export function parseWeeklyCsv(text: string): FlowRow[] {
+  return parseRows(parseCsv(text));
 }
 
 const INVESTOR_PATTERNS: [RegExp, Investor][] = [
@@ -141,7 +173,8 @@ export function parseWorkbook(buf: ArrayBuffer): FlowRow[] {
 export async function fetchWeek(url: string): Promise<WeekData> {
   const res = await fetch(url, { headers: { "User-Agent": UA } });
   if (!res.ok) throw new Error(`JPX file HTTP ${res.status}`);
-  const flows = parseWorkbook(await res.arrayBuffer());
+  const buf = await res.arrayBuffer();
+  const flows = /\.csv$/i.test(url) ? parseWeeklyCsv(decodeJpx(buf)) : parseWorkbook(buf);
   const wk = weekFromFileName(url);
   if (!wk) throw new Error(`cannot infer week from file name: ${url}`);
   const opt = flows.filter((f) => f.product !== "fut");

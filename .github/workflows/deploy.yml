@@ -55,7 +55,12 @@ jobs:
           ARGS=""
           if [ -n "${{ vars.SITE_URL }}" ]; then ARGS="$ARGS --var SITE_URL:${{ vars.SITE_URL }}"; fi
           if [ -n "${{ vars.X_POST_ENABLED }}" ]; then ARGS="$ARGS --var X_POST_ENABLED:${{ vars.X_POST_ENABLED }}"; fi
-          npx wrangler deploy $ARGS
+          set -o pipefail
+          if ! npx wrangler deploy $ARGS 2>&1 | tee deploy.log; then
+            # エラー内容を注釈として残す(ログを開かずに確認できるように)
+            grep -v "^\s*$" deploy.log | tail -25 | sed 's/^/::error::/' ; exit 1
+          fi
+          grep -Eo "https://[a-z0-9.-]+\.workers\.dev" deploy.log | head -1 | sed 's/^/::notice title=Deployed::/' || true
 
       # GitHub Secrets に登録されているものだけ Worker の secret に同期
       - name: Sync worker secrets

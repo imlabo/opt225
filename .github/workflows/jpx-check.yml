@@ -1,0 +1,20 @@
+name: JPX parse check
+
+# JPX の最新週次ファイルを取得して解析結果を表示する(D1 には保存しない)
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 8 * * 4" # 木 17:00 JST: レイアウト変更の早期検知
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npx tsx scripts/jpx-check.ts | tee jpx-check.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: jpx-check, path: "jpx-check.txt\njpx-files/" }

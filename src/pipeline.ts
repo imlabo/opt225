@@ -15,7 +15,14 @@ export interface RunResult {
 export async function runPipeline(env: Env, opts: { force?: boolean; backfill?: number } = {}): Promise<RunResult> {
   const result: RunResult = { ingested: [], errors: [] };
   try {
-    const files = (await discoverLatestFiles(env.JPX_INDEX_URL)).slice(0, opts.backfill ?? 1);
+    const all = await discoverLatestFiles(env.JPX_INDEX_URL);
+    // 一覧には飛び地の古い週が混ざることがあるので、最新週から 120 日以内に限る
+    const newest = weekFromFileName(all[0] ?? "")?.weekEnd;
+    const recent = all.filter((u) => {
+      const w = weekFromFileName(u)?.weekEnd;
+      return newest && w && Date.parse(newest) - Date.parse(w) <= 120 * 864e5;
+    });
+    const files = recent.slice(0, opts.backfill ?? 1);
     for (const url of files.reverse()) {
       const wk = weekFromFileName(url);
       if (wk && !opts.force && (await hasWeek(env, wk.weekEnd))) continue;

@@ -1,5 +1,5 @@
 import type { Analysis } from "./analysis";
-import { POSITION_WINDOW, WEIGHTS } from "./analysis";
+import { POSITION_WINDOW, WEIGHTS, Z_WINDOW } from "./analysis";
 import type { WeekData } from "./types";
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
@@ -40,6 +40,7 @@ export function renderPage(opts: { latest?: Analysis; history: Analysis[]; week?
     ? `<section class="card"><h2>データ未取得</h2><p>JPX の週次データ取得後に表示されます。</p></section>`
     : `
   ${week?.isSample ? `<div class="banner">⚠ 表示中はサンプルデータです(実データではありません)。</div>` : ""}
+  ${history.length < Z_WINDOW / 2 ? `<div class="banner">データ蓄積中(${history.length}週分)。比較対象の週が少ないため、${Math.ceil(Z_WINDOW / 2)}週分たまるまではスコアの信頼度が低めです。</div>` : ""}
   <section class="hero card">
     <div>
       <p class="eyebrow">${esc(week?.weekStart ?? "")} 〜 ${esc(latest.weekEnd)} 週の売買から推計</p>

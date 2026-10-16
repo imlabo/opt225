@@ -1,0 +1,28 @@
+name: Daily ingest
+
+# JPX の日次ファイル(建玉・清算値段)を取得・解析して Worker に送る。
+# Workers の CPU 制限内では 4MB の CSV を解析できないため、解析はここで行う。
+# 取得済みの日は Worker 側で上書き(冪等)、X 投稿は 1 日 1 回のみ。
+on:
+  schedule:
+    - cron: "30 9 * * 1-5"  # 18:30 JST
+    - cron: "30 12 * * 1-5" # 21:30 JST(公表遅れ時の再試行)
+  workflow_dispatch:
+
+concurrency: daily
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - name: Fetch, parse and send
+        env:
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+          SITE_URL_VAR: ${{ vars.SITE_URL }}
+        run: |
+          export SITE_URL="${SITE_URL_VAR:-$(grep -Eo 'SITE_URL = "[^"]+"' wrangler.toml | cut -d'"' -f2)}"
+          npx tsx scripts/daily-fetch.mts

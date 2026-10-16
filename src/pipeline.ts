@@ -1,3 +1,6 @@
+import { analyzeDaily, type DailyInput } from "./daily";
+import { loadDailyAnalyses, logDailyPost, saveDaily, wasDailyPosted } from "./db";
+import { composeDailyTweet } from "./x";
 import { analyze } from "./analysis";
 import { hasWeek, loadHistory, logPost, saveAnalysis, saveWeek, wasPosted } from "./db";
 import { discoverLatestFiles, fetchWeek, weekFromFileName } from "./jpx";
@@ -61,9 +64,7 @@ export async function analyzeAndPost(env: Env, forcePost = false) {
   if (!forcePost && (await wasPosted(env, latest.weekEnd))) return { analyzed: latest.weekEnd, post: { status: "already_posted" } };
 
   const text = composeTweet(latest, env.SITE_URL);
-  const creds = env.X_API_KEY && env.X_API_SECRET && env.X_ACCESS_TOKEN && env.X_ACCESS_SECRET
-    ? { apiKey: env.X_API_KEY, apiSecret: env.X_API_SECRET, accessToken: env.X_ACCESS_TOKEN, accessSecret: env.X_ACCESS_SECRET }
-    : null;
+  const creds = xCreds(env);
   if (env.X_POST_ENABLED !== "true" || !creds) {
     await logPost(env, latest.weekEnd, text, "dry_run");
     return { analyzed: latest.weekEnd, post: { status: "dry_run", text } };
@@ -76,4 +77,34 @@ export async function analyzeAndPost(env: Env, forcePost = false) {
     await logPost(env, latest.weekEnd, text, "failed", undefined, String(e));
     return { analyzed: latest.weekEnd, post: { status: "failed", text, error: String(e) } };
   }
+}
+
+// ---- 日次 ----
+
+export async function ingestDaily(env: Env, d: DailyInput, forcePost = false) {
+  const [prev] = (await loadDailyAnalyses(env, 1, d.tradeDate)).slice(-1);
+  const a = analyzeDaily(d, prev);
+  await saveDaily(env, d, a);
+
+  const text = composeDailyTweet(a, env.SITE_URL);
+  if (!forcePost && (await wasDailyPosted(env, a.tradeDate))) return { analysis: a, post: { status: "already_posted" } };
+  const creds = xCreds(env);
+  if (env.X_POST_ENABLED !== "true" || !creds) {
+    await logDailyPost(env, a.tradeDate, text, "dry_run");
+    return { analysis: a, post: { status: "dry_run", text } };
+  }
+  try {
+    const id = await postTweet(text, creds);
+    await logDailyPost(env, a.tradeDate, text, "posted", id);
+    return { analysis: a, post: { status: "posted", tweetId: id, text } };
+  } catch (e) {
+    await logDailyPost(env, a.tradeDate, text, "failed", undefined, String(e));
+    return { analysis: a, post: { status: "failed", text, error: String(e) } };
+  }
+}
+
+function xCreds(env: Env) {
+  return env.X_API_KEY && env.X_API_SECRET && env.X_ACCESS_TOKEN && env.X_ACCESS_SECRET
+    ? { apiKey: env.X_API_KEY, apiSecret: env.X_API_SECRET, accessToken: env.X_ACCESS_TOKEN, accessSecret: env.X_ACCESS_SECRET }
+    : null;
 }

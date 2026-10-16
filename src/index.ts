@@ -1,16 +1,22 @@
 import { Hono } from "hono";
-import { loadAnalyses, loadHistory } from "./db";
+import { loadAnalyses, loadDailyAnalyses, loadDailyStrikes, loadHistory } from "./db";
+import type { DailyInput } from "./daily";
 import { decodeJpx, parseWeeklyCsv } from "./jpx";
-import { analyzeAndPost, ingestManual, runPipeline } from "./pipeline";
+import { analyzeAndPost, ingestDaily, ingestManual, runPipeline } from "./pipeline";
 import { renderPage } from "./page";
 import { INVESTORS, type Env, type WeekData } from "./types";
 
 const app = new Hono<{ Bindings: Env }>();
 
 app.get("/", async (c) => {
-  const [history, weeks] = await Promise.all([loadAnalyses(c.env), loadHistory(c.env, undefined, 1)]);
+  const [history, weeks, dailyHistory] = await Promise.all([loadAnalyses(c.env), loadHistory(c.env, undefined, 1), loadDailyAnalyses(c.env, 30)]);
+  const dl = dailyHistory[dailyHistory.length - 1];
+  const strikes = dl ? await loadDailyStrikes(c.env, dl.tradeDate, dl.front.month) : [];
   c.header("Cache-Control", "public, max-age=300");
-  return c.html(renderPage({ latest: history[history.length - 1], history, week: weeks[0], siteUrl: c.env.SITE_URL }));
+  return c.html(renderPage({
+    latest: history[history.length - 1], history, week: weeks[0], siteUrl: c.env.SITE_URL,
+    daily: { latest: dl, history: dailyHistory, strikes },
+  }));
 });
 
 app.get("/api/latest", async (c) => {
@@ -18,6 +24,11 @@ app.get("/api/latest", async (c) => {
   return list.length ? c.json(list[0]) : c.json({ error: "no data" }, 404);
 });
 app.get("/api/history", async (c) => c.json(await loadAnalyses(c.env, 104)));
+app.get("/api/daily/latest", async (c) => {
+  const [a] = (await loadDailyAnalyses(c.env, 1)).slice(-1);
+  return a ? c.json(a) : c.json({ error: "no data" }, 404);
+});
+app.get("/api/daily/history", async (c) => c.json(await loadDailyAnalyses(c.env, 250)));
 
 // ---- 管理 API (Authorization: Bearer ADMIN_TOKEN) ----
 app.use("/admin/*", async (c, next) => {
@@ -40,6 +51,17 @@ app.post("/admin/ingest", async (c) => {
   }
   await ingestManual(c.env, w);
   return c.json(c.req.query("post") === "1" ? await analyzeAndPost(c.env) : { ok: true });
+});
+
+/** 日次データ投入(GitHub Actions の scripts/daily-fetch.mts から)。?post=force で再投稿 */
+app.post("/admin/ingest-daily", async (c) => {
+  const d = await c.req.json<DailyInput>();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d.tradeDate ?? "") || !(d.spot > 0) || !Array.isArray(d.strikes) || !d.strikes.length) {
+    return c.json({ error: "invalid body" }, 400);
+  }
+  const r = await ingestDaily(c.env, d, c.req.query("post") === "force");
+  const a = r.analysis;
+  return c.json({ tradeDate: a.tradeDate, spot: a.spot, pcr: a.pcr, maxPain: a.maxPain, putWall: a.putWall, callWall: a.callWall, atmIv: a.atmIv, post: r.post.status });
 });
 
 /** JPX の週次 CSV をボディで送って解析結果だけ確認(保存しない) */

@@ -1,4 +1,5 @@
 import type { Analysis } from "./analysis";
+import type { DailyAnalysis } from "./daily";
 
 /** RFC3986 percent-encode (OAuth 1.0a) */
 export const pct = (s: string) =>
@@ -91,6 +92,26 @@ export function composeTweet(a: Analysis, siteUrl: string): string {
   ];
   let text = lines.join("\n");
   // 念のため上限超過時はハッシュタグから削る
+  if (weightedLength(text) > 280) text = lines.filter((l) => !l.startsWith("#")).join("\n");
+  return text;
+}
+
+const yen = (n: number) => Math.round(n).toLocaleString("ja-JP");
+
+export function composeDailyTweet(a: DailyAnalysis, siteUrl: string): string {
+  const m = `${Number(a.front.month.slice(4))}月限`;
+  const lines = [
+    `【日経225OP 日次 ${a.tradeDate.slice(5).replace("-", "/")}】`,
+    `日経平均 ${yen(a.spot)}${a.fut ? ` / 先物${Number(a.fut.month.slice(4))}月 ${yen(a.fut.price)}` : ""}`,
+    `${m}(SQまで${a.front.days}日)`,
+    a.putWall && a.callWall ? `建玉の壁 下${yen(a.putWall.strike)} / 上${yen(a.callWall.strike)}` : "",
+    a.maxPain ? `最大苦痛 ${yen(a.maxPain)} / P/C比 ${a.pcr.toFixed(2)}` : `P/C比 ${a.pcr.toFixed(2)}`,
+    a.atmIv && a.expectedMove ? `ATM IV ${a.atmIv.toFixed(1)}% 1σ ±${yen(a.expectedMove)}` : "",
+    "※機械的集計・投資助言ではありません",
+    "#日経225オプション",
+    siteUrl,
+  ].filter(Boolean);
+  let text = lines.join("\n");
   if (weightedLength(text) > 280) text = lines.filter((l) => !l.startsWith("#")).join("\n");
   return text;
 }

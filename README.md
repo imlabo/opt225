@@ -53,10 +53,23 @@ curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" "https://<site>/admin/run"
 
 `.github/workflows/jpx-check.yml` は JPX の最新 CSV を取得・解析して結果を `jpx-check` ブランチに保存する診断用ワークフローです(毎週木曜にも実行。フォーマット変更の早期検知用)。
 
+## 日次分析 (`src/daily.ts`, `src/jpx-daily.ts`)
+| データ | 取得元 | 内容 |
+|---|---|---|
+| 建玉 | 当日取引高等 `YYYYMMDDopen_interest.xlsx`「別紙1」 | 日経225オプションの行使価格別 建玉・前日比・取引高(期近3限月) |
+| 清算値段 | 先物・オプション清算値段等 `rbYYYYMMDD.csv`(Shift_JIS) | 清算価格・IV・原資産価格(日経平均)・先物清算価格・残日数 |
+
+期近(SQ まで 3 日以上の最も近い限月)について、下の壁(現値以下で最大のプット建玉)、上の壁(現値以上で最大のコール建玉)、最大苦痛価格、P/C建玉比、ATM IV、SQ までの 1σ 変動幅を算出します。日次では投資部門別の内訳は公表されていません。
+
+CSV(約4MB)と Excel の解析は Workers 無料枠の CPU 時間(10ms)に収まらないため、`.github/workflows/daily.yml`(平日 18:30 / 21:30 JST)で `scripts/daily-fetch.mts` が解析し、必要な行だけを `POST /admin/ingest-daily` に送ります。Worker 側で D1 保存・分析・表示・X 投稿(1日1回)を行います。
+
+公開 API: `GET /api/daily/latest`, `GET /api/daily/history`
+
 ## 管理 API (`Authorization: Bearer ADMIN_TOKEN`)
 | エンドポイント | 内容 |
 |---|---|
 | `POST /admin/run[?force=1&backfill=N]` | 取得→分析→投稿を手動実行 |
+| `POST /admin/ingest-daily[?post=force]` | 日次データ投入(daily ワークフローから) |
 | `POST /admin/ingest[?post=1]` | 週データを JSON で直接投入(JPX レイアウト変更時のフォールバック) |
 | `POST /admin/parse-preview` | JPX の週次 CSV をボディで送って解析結果のみ確認 (`--data-binary @file.csv`) |
 | `POST /admin/clear-sample` | サンプルデータ削除 |

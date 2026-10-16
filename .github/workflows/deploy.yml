@@ -76,7 +76,7 @@ jobs:
             # エラー内容を注釈として残す(ログを開かずに確認できるように)
             grep -v "^\s*$" deploy.log | tail -25 | sed 's/^/::error::/' ; exit 1
           fi
-          grep -Eo "https://[a-z0-9.-]+\.workers\.dev" deploy.log | head -1 | sed 's/^/::notice title=Deployed::/' || true
+          grep -Eo "https://[a-z0-9.-]+\.workers\.dev" deploy.log | grep -v example | sort -u | sed 's/^/::notice title=Deployed::/' || true
 
       # GitHub Secrets に登録されているものだけ Worker の secret に同期
       - name: Sync worker secrets
@@ -94,3 +94,18 @@ jobs:
             console.log("syncing:", Object.keys(o).join(", ") || "(none)");'
           if [ "$(cat secrets.json)" != "{}" ]; then npx wrangler secret bulk secrets.json; fi
           rm -f secrets.json
+
+      # 公開 URL の疎通確認と、取得パイプラインの実行(冪等: 取得済みの週はスキップ)
+      - name: Smoke test & ingest
+        env:
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+        run: |
+          URL="${{ vars.SITE_URL }}"
+          [ -z "$URL" ] && URL=$(grep -Eo 'SITE_URL = "[^"]+"' wrangler.toml | cut -d'"' -f2)
+          for i in 1 2 3 4 5 6; do CODE=$(curl -s -o /dev/null -w "%{http_code}" "$URL/"); [ "$CODE" = 200 ] && break; sleep 10; done
+          echo "::notice title=GET /::$URL -> HTTP $CODE"
+          if [ -n "$ADMIN_TOKEN" ]; then
+            RES=$(curl -s -X POST -H "Authorization: Bearer $ADMIN_TOKEN" "$URL/admin/run")
+            echo "::notice title=/admin/run::$(echo "$RES" | jq -c '{ingested, errors, analyzed, post: .post.status}')"
+          fi
+          echo "::notice title=/api/latest::$(curl -s "$URL/api/latest" | jq -c '{weekEnd, score, bias, volSignal}')"

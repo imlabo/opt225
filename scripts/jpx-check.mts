@@ -1,8 +1,8 @@
 // JPX の週次ファイルを取得し、リンク抽出 → 解析 → 主要値を出力する診断スクリプト
-// usage: npx tsx scripts/jpx-check.ts [indexUrl]
+// usage: npx tsx scripts/jpx-check.mts [indexUrl]
 import { mkdirSync, writeFileSync } from "node:fs";
 import * as XLSX from "xlsx";
-import { extractExcelLinks, parseWorkbook, weekFromFileName } from "../src/jpx";
+import { extractExcelLinks, parseWorkbook, weekFromFileName } from "../src/jpx.ts";
 
 const indexUrl = process.argv[2] ?? "https://www.jpx.co.jp/markets/statistics-derivatives/sector/index.html";
 const UA = "Mozilla/5.0 (compatible; opt225/1.0)";

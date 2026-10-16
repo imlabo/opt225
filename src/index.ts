@@ -26,9 +26,9 @@ app.use("/admin/*", async (c, next) => {
   await next();
 });
 
-/** JPX 取得→分析→投稿を手動実行。?force=1 で再取得・再投稿, ?backfill=N で過去N週分 */
+/** JPX 取得→分析→投稿を手動実行。?force=1 で再取得・再投稿, ?backfill=N で新しい順に N 週分まで(省略時は掲載中の未取得週すべて) */
 app.post("/admin/run", async (c) =>
-  c.json(await runPipeline(c.env, { force: c.req.query("force") === "1", backfill: Number(c.req.query("backfill") ?? 1) })),
+  c.json(await runPipeline(c.env, { force: c.req.query("force") === "1", backfill: c.req.query("backfill") ? Number(c.req.query("backfill")) : undefined })),
 );
 
 /** JPX のレイアウト変更時などに JSON で週データを直接投入 */

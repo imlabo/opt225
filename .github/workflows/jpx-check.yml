@@ -1,10 +1,14 @@
 name: JPX parse check
 
 # JPX の最新週次ファイルを取得して解析結果を表示する(D1 には保存しない)
+# 結果は jpx-check ブランチにも保存する
 on:
   workflow_dispatch:
   schedule:
     - cron: "0 8 * * 4" # 木 17:00 JST: レイアウト変更の早期検知
+
+permissions:
+  contents: write
 
 jobs:
   check:
@@ -14,7 +18,11 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
       - run: npm ci
-      - run: npx tsx scripts/jpx-check.mts | tee jpx-check.txt
-      - uses: actions/upload-artifact@v4
+      - run: npx tsx scripts/jpx-check.mts 2>&1 | tee jpx-check.txt; exit ${PIPESTATUS[0]}
+      - name: Save result to jpx-check branch
         if: always()
-        with: { name: jpx-check, path: "jpx-check.txt\njpx-files/" }
+        run: |
+          mkdir -p /tmp/out && cp -r jpx-check.txt jpx-files /tmp/out/ 2>/dev/null || true
+          git config user.name github-actions && git config user.email github-actions@users.noreply.github.com
+          git checkout --orphan jpx-check && git rm -rfq . && git clean -fdxq
+          cp -r /tmp/out/. . && git add -A && git commit -qm "JPX check $(date -u +%FT%TZ)" && git push -f origin jpx-check

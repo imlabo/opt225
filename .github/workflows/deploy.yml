@@ -50,6 +50,22 @@ jobs:
       - name: Apply D1 migrations
         run: npx wrangler d1 migrations apply opt225 --remote
 
+      # workers.dev サブドメイン未登録のアカウントなら登録する(既に登録済みなら何もしない)
+      - name: Ensure workers.dev subdomain
+        env:
+          WANT: ${{ vars.WORKERS_SUBDOMAIN }}
+        run: |
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain"
+          CUR=$(curl -s -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$API" | jq -r '.result.subdomain // empty')
+          if [ -n "$CUR" ]; then echo "::notice title=workers.dev::$CUR.workers.dev"; exit 0; fi
+          for NAME in ${WANT:-imlabo imlabo-opt225 opt225-$CLOUDFLARE_ACCOUNT_ID}; do
+            R=$(curl -s -X PUT -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" \
+              -d "{\"subdomain\":\"${NAME:0:63}\"}" "$API")
+            if [ "$(echo "$R" | jq -r .success)" = "true" ]; then echo "::notice title=workers.dev registered::${NAME:0:63}.workers.dev"; exit 0; fi
+            echo "::warning::subdomain $NAME failed: $(echo "$R" | jq -c .errors)"
+          done
+          exit 1
+
       - name: Deploy worker
         run: |
           ARGS=""

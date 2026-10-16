@@ -21,8 +21,8 @@ JPX「投資部門別取引状況(先物・オプション/週間)」から日�
 ## セットアップ
 ```bash
 npm i
-npx wrangler d1 create nikkei-option-flow          # 出力の database_id を wrangler.toml に記入
-npx wrangler d1 migrations apply nikkei-option-flow --remote
+npx wrangler d1 create opt225          # 出力の database_id を wrangler.toml に記入
+npx wrangler d1 migrations apply opt225 --remote
 npx wrangler secret put ADMIN_TOKEN
 npx wrangler secret put X_API_KEY        # X Developer Portal の API Key
 npx wrangler secret put X_API_SECRET
@@ -59,8 +59,8 @@ product: `call|put|fut`, investor: `individual|corporate|foreign|securities|prop
 
 ## ローカル開発
 ```bash
-npx wrangler d1 migrations apply nikkei-option-flow --local
-node scripts/gen-sample.mjs > sample.sql && npx wrangler d1 execute nikkei-option-flow --local --file sample.sql  # 乱数サンプル
+npx wrangler d1 migrations apply opt225 --local
+node scripts/gen-sample.mjs > sample.sql && npx wrangler d1 execute opt225 --local --file sample.sql  # 乱数サンプル
 echo 'ADMIN_TOKEN=devtoken' > .dev.vars && npx wrangler dev
 npm test
 ```

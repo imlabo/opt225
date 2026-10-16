@@ -9,7 +9,7 @@ import type { FlowRow, Investor, Product, WeekData } from "./types";
  * 解析できなかった場合は /admin/ingest に JSON を手動投入できる。
  */
 
-const UA = "Mozilla/5.0 (compatible; nikkei-option-flow/1.0)";
+const UA = "Mozilla/5.0 (compatible; opt225/1.0)";
 
 export async function discoverLatestFiles(indexUrl: string): Promise<string[]> {
   const res = await fetch(indexUrl, { headers: { "User-Agent": UA } });

@@ -1,11 +1,11 @@
-name = "nikkei-option-flow"
+name = "opt225"
 main = "src/index.ts"
 compatibility_date = "2026-09-01"
 compatibility_flags = ["nodejs_compat"]
 
 [[d1_databases]]
 binding = "DB"
-database_name = "nikkei-option-flow"
+database_name = "opt225"
 database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
 migrations_dir = "migrations"
 
@@ -15,7 +15,7 @@ migrations_dir = "migrations"
 crons = ["30 7 * * 4,5"]
 
 [vars]
-SITE_URL = "https://nikkei-option-flow.example.workers.dev"
+SITE_URL = "https://opt225.example.workers.dev"
 JPX_INDEX_URL = "https://www.jpx.co.jp/markets/statistics-derivatives/sector/index.html"
 X_POST_ENABLED = "false"
 # Secrets (wrangler secret put):

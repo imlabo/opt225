@@ -1,5 +1,5 @@
 // デモ表示用のサンプルデータ(乱数・実データではない)を SQL で出力
-// usage: node scripts/gen-sample.mjs > sample.sql && npx wrangler d1 execute nikkei-option-flow --local --file sample.sql
+// usage: node scripts/gen-sample.mjs > sample.sql && npx wrangler d1 execute opt225 --local --file sample.sql
 let seed = 42;
 const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2 ** 31) / 2 ** 31);
 const inv = { individual: 60000, corporate: 25000, foreign: 180000, securities: 30000, proprietary: 120000 };

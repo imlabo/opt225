@@ -18,33 +18,47 @@ JPX「投資部門別取引状況(先物・オプション/週間)」から日�
 - 個人のオプション純売り(ショート・ボラ)の z で「急変動警戒/変動拡大注意/平常/変動縮小気味」
 - 重み・期間は `WEIGHTS` / `POSITION_WINDOW` / `Z_WINDOW` で調整可能
 
-## セットアップ
-```bash
-npm i
-npx wrangler d1 create opt225          # 出力の database_id を wrangler.toml に記入
-npx wrangler d1 migrations apply opt225 --remote
-npx wrangler secret put ADMIN_TOKEN
-npx wrangler secret put X_API_KEY        # X Developer Portal の API Key
-npx wrangler secret put X_API_SECRET
-npx wrangler secret put X_ACCESS_TOKEN   # 投稿するアカウントの Access Token (Read and Write 権限)
-npx wrangler secret put X_ACCESS_SECRET
-# wrangler.toml の SITE_URL を本番 URL に、X_POST_ENABLED を "true" に
-npx wrangler deploy
-```
-`X_POST_ENABLED` が `"true"` でない、または鍵が未設定の間は投稿せず `posts` テーブルに `dry_run` として記録します。
+## データソース (`src/jpx.ts`)
+JPX「投資部門別取引状況」週次 CSV `Tousi_DV_W_YYYYMMDD_YYYYMMDD.csv`(コード形式)。同週の PDF 版と突合済み。
 
-### 初回データ投入
+| 帳票種別 | 商品 | | 投資部門コード | 部門 |
+|---|---|---|---|---|
+| 301 | 日経225先物 | | 11 | 自己 |
+| 303 | 日経225オプション プット | | 51 | 個人 |
+| 304 | 日経225オプション コール | | 60 | 海外投資家 |
+| | | | 41 | 証券会社 |
+| | | | 21–24, 31–33 | 法人(金融機関・投信・事業法人・その他法人の合計) |
+
+数量金額区分 1=数量(枚), 2=金額(円, オプションはプレミアム代金)。JPX の一覧ページに載るのは直近数週分のみのため、履歴は毎週の取得で D1 に蓄積していきます(初回は掲載分をすべて取り込み)。
+
+## デプロイ (GitHub Actions)
+`main` への push で `.github/workflows/deploy.yml` が テスト → D1 作成(初回のみ)→ マイグレーション → デプロイ → シークレット同期 を実行します。
+
+リポジトリの **Settings → Secrets and variables → Actions** に登録:
+
+| 種類 | 名前 | 内容 |
+|---|---|---|
+| Secret | `CLOUDFLARE_API_TOKEN` | Cloudflare API トークン(テンプレート「Edit Cloudflare Workers」+ D1 の Edit 権限) |
+| Secret | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare アカウント ID |
+| Secret | `ADMIN_TOKEN` | 管理 API 用の任意の長いランダム文字列 |
+| Secret | `X_API_KEY` / `X_API_SECRET` | X Developer Portal の API Key / Secret |
+| Secret | `X_ACCESS_TOKEN` / `X_ACCESS_SECRET` | 投稿アカウントの Access Token / Secret(Read and Write) |
+| Variable | `SITE_URL` | 公開 URL(投稿文に載る) |
+| Variable | `X_POST_ENABLED` | `true` で実投稿。未設定・`false` の間は `posts` に `dry_run` として記録のみ |
+
+デプロイ後、Cron(木・金 16:30 JST)が自動で取得・分析・投稿します。すぐに初回データを入れる場合:
 ```bash
-# 過去 N 週分を JPX から取り込み(最新週のみ X 投稿)
-curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" "https://<site>/admin/run?backfill=26"
+curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" "https://<site>/admin/run"
 ```
+
+`.github/workflows/jpx-check.yml` は JPX の最新 CSV を取得・解析して結果を `jpx-check` ブランチに保存する診断用ワークフローです(毎週木曜にも実行。フォーマット変更の早期検知用)。
 
 ## 管理 API (`Authorization: Bearer ADMIN_TOKEN`)
 | エンドポイント | 内容 |
 |---|---|
 | `POST /admin/run[?force=1&backfill=N]` | 取得→分析→投稿を手動実行 |
 | `POST /admin/ingest[?post=1]` | 週データを JSON で直接投入(JPX レイアウト変更時のフォールバック) |
-| `POST /admin/parse-preview` | Excel をボディで送って解析結果のみ確認 (`--data-binary @file.xls`) |
+| `POST /admin/parse-preview` | JPX の週次 CSV をボディで送って解析結果のみ確認 (`--data-binary @file.csv`) |
 | `POST /admin/clear-sample` | サンプルデータ削除 |
 
 `/admin/ingest` の例:
@@ -66,6 +80,5 @@ npm test
 ```
 
 ## 注意
-- JPX の Excel 解析(`src/jpx.ts`)は列位置ではなく「日経225/プット/コール」「個人/法人…」「売り/買い」の文字列で探すヒューリスティック。
-  初回は実ファイルで `/admin/parse-preview` を叩き、値が JPX の PDF と一致するか確認してください。
-- 枚数ベースのためプレミアム・行使価格・限月差は考慮していません。投資助言ではありません。
+- JPX がコード体系や CSV 列を変えた場合、`fetchWeek` が「option rows not found」で失敗します。`jpx-check` ワークフローで中身を確認し、`PRODUCT_CODES` / `INVESTOR_CODES` を更新してください。急ぎの場合は `/admin/ingest` で手動投入できます。
+- 推計は枚数ベースで、行使価格・限月差は考慮していません(金額は D1 に保存済み)。投資助言ではありません。

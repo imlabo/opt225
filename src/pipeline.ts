@@ -22,7 +22,9 @@ export async function runPipeline(env: Env, opts: { force?: boolean; backfill?: 
       const w = weekFromFileName(u)?.weekEnd;
       return newest && w && Date.parse(newest) - Date.parse(w) <= 120 * 864e5;
     });
-    const files = recent.slice(0, opts.backfill ?? 1);
+    // DB が空(初回)なら取得可能な週をすべて取り込む
+    const empty = !(await env.DB.prepare("SELECT 1 FROM weeks WHERE is_sample = 0 LIMIT 1").first());
+    const files = recent.slice(0, opts.backfill ?? (empty ? recent.length : 1));
     for (const url of files.reverse()) {
       const wk = weekFromFileName(url);
       if (wk && !opts.force && (await hasWeek(env, wk.weekEnd))) continue;

@@ -175,14 +175,14 @@ export async function loadLatestPrediction(env: Env): Promise<Prediction | null>
   return r ? (JSON.parse(r.detail_json) as Prediction) : null;
 }
 
-export interface ModelLog { tradeDate: string; n: number; weights: Weights; k: number; metrics: Metrics }
+export interface ModelLog { tradeDate: string; n: number; weights: Weights; prior?: Weights; k: number; metrics: Metrics & { ichi?: { calls: number; hits: number; hitRate: number | null } } }
 
 export async function saveModelLog(env: Env, m: ModelLog) {
   await env.DB.prepare(
-    `INSERT INTO model_log (trade_date, n, weights_json, k, metrics_json) VALUES (?, ?, ?, ?, ?)
+    `INSERT INTO model_log (trade_date, n, weights_json, k, metrics_json, prior_json) VALUES (?, ?, ?, ?, ?, ?)
      ON CONFLICT(trade_date) DO UPDATE SET n=excluded.n, weights_json=excluded.weights_json, k=excluded.k,
-       metrics_json=excluded.metrics_json, created_at=datetime('now')`,
-  ).bind(m.tradeDate, m.n, JSON.stringify(m.weights), m.k, JSON.stringify(m.metrics)).run();
+       metrics_json=excluded.metrics_json, prior_json=excluded.prior_json, created_at=datetime('now')`,
+  ).bind(m.tradeDate, m.n, JSON.stringify(m.weights), m.k, JSON.stringify(m.metrics), m.prior ? JSON.stringify(m.prior) : null).run();
 }
 
 export async function loadModelLogs(env: Env, limit = 60): Promise<ModelLog[]> {
@@ -190,6 +190,7 @@ export async function loadModelLogs(env: Env, limit = 60): Promise<ModelLog[]> {
   return r.results.map((x) => ({
     tradeDate: String(x.trade_date), n: Number(x.n), k: Number(x.k),
     weights: JSON.parse(String(x.weights_json)), metrics: JSON.parse(String(x.metrics_json)),
+    prior: x.prior_json ? JSON.parse(String(x.prior_json)) : undefined,
   })).reverse();
 }
 
@@ -243,4 +244,14 @@ export async function loadSentiment(env: Env, days = 365, asOf?: string): Promis
     cnn: meta ? JSON.parse(meta.value_json) : null,
     cnnHistory: cn.results,
   };
+}
+
+export async function loadMeta<T>(env: Env, key: string): Promise<T | null> {
+  const r = await env.DB.prepare("SELECT value_json FROM fg_meta WHERE key = ?").bind(key).first<{ value_json: string }>();
+  return r ? (JSON.parse(r.value_json) as T) : null;
+}
+export async function saveMeta(env: Env, key: string, value: unknown) {
+  await env.DB.prepare(
+    `INSERT INTO fg_meta (key, value_json) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json, updated_at=datetime('now')`,
+  ).bind(key, JSON.stringify(value)).run();
 }

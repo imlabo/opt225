@@ -1,6 +1,6 @@
 import { analyzeDaily, type DailyAnalysis, type DailyInput } from "./daily";
-import { evaluatePending, loadAnalyses, loadSentiment, loadDailyAnalyses, loadEvaluated, logDailyPost, saveDaily, saveModelLog, savePrediction, wasDailyPosted } from "./db";
-import { calibrateK, features, fit, makePrediction, metrics, type Prediction } from "./model";
+import { evaluatePending, loadAnalyses, loadMeta, saveMeta, loadSentiment, loadDailyAnalyses, loadEvaluated, logDailyPost, saveDaily, saveModelLog, savePrediction, wasDailyPosted } from "./db";
+import { calibrateK, features, fit, ichiMetrics, makePrediction, metrics, PRIOR, type Prediction } from "./model";
 import { composeDailyTweet } from "./x";
 import { analyze } from "./analysis";
 import { hasWeek, loadHistory, logPost, saveAnalysis, saveWeek, wasPosted } from "./db";
@@ -113,22 +113,27 @@ export async function ingestDaily(env: Env, d: DailyInput, forcePost = false) {
 export async function learnAndPredict(env: Env, a: DailyAnalysis) {
   const evaluatedNow = await evaluatePending(env, a.tradeDate, a.spot);
   const ev = await loadEvaluated(env);
-  const weights = fit(ev.map((e) => ({ x: e.x, y: e.actualSpot > e.spot ? 1 : 0 })));
+  // 一目均衡表の重みは過去データのバックテスト結果を事前仮説にする
+  const ichiPrior = a.ichimoku?.prior ?? (await loadMeta<Record<string, number>>(env, "ichimoku_prior")) ?? {};
+  if (a.ichimoku) await saveMeta(env, "ichimoku_prior", a.ichimoku.prior);
+  const prior = { ...PRIOR, ...ichiPrior };
+  const weights = fit(ev.map((e) => ({ x: e.x, y: e.actualSpot > e.spot ? 1 : 0 })), prior);
   const k = calibrateK(ev.map((e) => Math.abs(e.actualSpot - e.spot) / e.sigma1d));
-  const m = metrics(ev); // 各予測を出した時点のモデルでの成績(後知恵なしの実績)
-  await saveModelLog(env, { tradeDate: a.tradeDate, n: ev.length, weights, k, metrics: m });
+  const m = { ...metrics(ev), ichi: ichiMetrics(ev) }; // 各予測を出した時点の成績(後知恵なし)
+  await saveModelLog(env, { tradeDate: a.tradeDate, n: ev.length, weights, prior, k, metrics: m });
 
   const [weekly] = (await loadAnalyses(env, 1)).slice(-1);
   const fg = await loadSentiment(env, 7, a.tradeDate);
   const fgSet = { nikkei: fg.nikkei?.score ?? null, cnn: fg.cnnHistory[fg.cnnHistory.length - 1]?.score ?? null };
-  const prediction: Prediction = makePrediction(a, features(a, weekly?.score ?? null, fgSet), weights, k, ev.length);
+  const ichiIn = a.ichimoku ? { signal: a.ichimoku.result.signal, timeHit: a.ichimoku.result.time.hits.length > 0 } : null;
+  const prediction: Prediction = makePrediction(a, features(a, weekly?.score ?? null, fgSet, ichiIn), weights, k, ev.length);
   await savePrediction(env, prediction);
 
   const last = ev[ev.length - 1];
   const lastResult = last && last.actualDate === a.tradeDate
     ? { tradeDate: last.tradeDate, call: last.call, up: last.actualSpot > last.spot, change: last.actualSpot - last.spot }
     : undefined;
-  return { prediction, metrics: m, weights, k, evaluatedNow, lastResult, fg: fgSet };
+  return { prediction, metrics: m, weights, prior, k, evaluatedNow, lastResult, fg: fgSet };
 }
 
 function xCreds(env: Env) {

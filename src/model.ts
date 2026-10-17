@@ -9,7 +9,8 @@
  */
 import type { DailyAnalysis } from "./daily";
 
-export const FEATURES = ["pain", "dPcr", "dIv", "skew", "wallPos", "basis", "weekly", "momentum", "fgNikkei", "fgCnn"] as const;
+export const ICHI_FEATURES = ["ichiTk", "ichiCloud", "ichiChikou", "ichiFuture", "ichiSlope", "ichiWave", "ichiTime"] as const;
+export const FEATURES = ["pain", "dPcr", "dIv", "skew", "wallPos", "basis", "weekly", "momentum", "fgNikkei", "fgCnn", ...ICHI_FEATURES] as const;
 export type FeatureName = (typeof FEATURES)[number];
 export type Features = Record<FeatureName, number>;
 
@@ -24,6 +25,13 @@ export const FEATURE_LABEL: Record<FeatureName, string> = {
   momentum: "前日比の勢い",
   fgNikkei: "日経225 Fear & Greed",
   fgCnn: "CNN Fear & Greed(米国)",
+  ichiTk: "一目: 転換線と基準線",
+  ichiCloud: "一目: 雲と価格",
+  ichiChikou: "一目: 遅行スパン",
+  ichiFuture: "一目: 先行スパン(先の雲)",
+  ichiSlope: "一目: 基準線の向き",
+  ichiWave: "一目: 波動(N波動)",
+  ichiTime: "一目: 時間論(変化日)",
 };
 
 /** 事前仮説(学習前の重み)。切片 + 各特徴量 */
@@ -39,6 +47,8 @@ export const PRIOR: { bias: number } & Features = {
   momentum: 0,
   fgNikkei: 0, // 逆張り/順張りどちらに効くかは実績で判断
   fgCnn: 0,
+  // 一目均衡表の事前重みは 0。過去データのバックテストで学習した重みがあればそれを事前仮説に使う
+  ichiTk: 0, ichiCloud: 0, ichiChikou: 0, ichiFuture: 0, ichiSlope: 0, ichiWave: 0, ichiTime: 0,
 };
 export const RIDGE = 4; // 事前仮説への引き戻しの強さ
 export const TRADING_DAYS = 245;
@@ -52,7 +62,17 @@ export const oneDaySigma = (a: DailyAnalysis) => (a.atmIv ? a.spot * (a.atmIv / 
 
 export interface Sentiments { nikkei?: number | null; cnn?: number | null }
 
-export function features(a: DailyAnalysis, weeklyScore: number | null, fg: Sentiments = {}): Features {
+export interface IchiInput { signal: Record<"tk" | "cloud" | "chikou" | "future" | "slope" | "wave", number>; timeHit: boolean }
+
+export function ichiFeatures(ichi?: IchiInput | null): Pick<Features, (typeof ICHI_FEATURES)[number]> {
+  const s = ichi?.signal;
+  return {
+    ichiTk: s?.tk ?? 0, ichiCloud: s?.cloud ?? 0, ichiChikou: s?.chikou ?? 0, ichiFuture: s?.future ?? 0,
+    ichiSlope: s?.slope ?? 0, ichiWave: s?.wave ?? 0, ichiTime: ichi?.timeHit ? 1 : 0,
+  };
+}
+
+export function features(a: DailyAnalysis, weeklyScore: number | null, fg: Sentiments = {}, ichi?: IchiInput | null): Features {
   const em = a.expectedMove || a.spot * 0.05;
   const gravity = a.front.days <= 10 ? 1 : 0.3;
   const span = a.putWall && a.callWall ? a.callWall.strike - a.putWall.strike : 0;
@@ -67,11 +87,12 @@ export function features(a: DailyAnalysis, weeklyScore: number | null, fg: Senti
     momentum: clip(a.prev ? (a.spot - a.prev.spot) / oneDaySigma(a) : 0),
     fgNikkei: clip(fg.nikkei != null ? (fg.nikkei - 50) / 25 : 0),
     fgCnn: clip(fg.cnn != null ? (fg.cnn - 50) / 25 : 0),
+    ...ichiFeatures(ichi),
   };
 }
 
 export type Weights = typeof PRIOR;
-const vec = (w: Weights) => [w.bias, ...FEATURES.map((f) => w[f])];
+const vec = (w: Weights) => [w.bias ?? 0, ...FEATURES.map((f) => w[f] ?? 0)];
 const unvec = (v: number[]): Weights => Object.fromEntries([["bias", v[0]], ...FEATURES.map((f, i) => [f, v[i + 1]])]) as Weights;
 const row = (x: Features) => [1, ...FEATURES.map((f) => x[f] ?? 0)];
 
@@ -127,6 +148,8 @@ export function calibrateK(ratios: number[]): number {
   return Math.max(0.5, Math.min(2.5, shrink * q + (1 - shrink) * 1));
 }
 
+export const JUDGMENT_LABEL = { up: "買い", down: "売り", flat: "様子見" } as const;
+
 export interface Prediction {
   tradeDate: string;
   spot: number;
@@ -148,7 +171,7 @@ export function makePrediction(a: DailyAnalysis, x: Features, w: Weights, k: num
     tradeDate: a.tradeDate, spot: a.spot, pUp,
     call: pUp >= CALL_THRESHOLD ? "up" : pUp <= 1 - CALL_THRESHOLD ? "down" : "flat",
     rangeLo: a.spot - k * sigma1d, rangeHi: a.spot + k * sigma1d, sigma1d, k, x,
-    contributions: FEATURES.map((f) => ({ feature: f, label: FEATURE_LABEL[f], value: w[f] * x[f] }))
+    contributions: FEATURES.map((f) => ({ feature: f, label: FEATURE_LABEL[f], value: (w[f] ?? 0) * (x[f] ?? 0) }))
       .sort((p, q) => Math.abs(q.value) - Math.abs(p.value)),
     modelN,
   };
@@ -181,4 +204,18 @@ export function metrics(ev: Evaluated[]): Metrics {
     brier: ev.reduce((s, e) => s + (e.pUp - up(e)) ** 2, 0) / n,
     upRate: ev.filter((e) => up(e) === 1).length / n,
   };
+}
+
+/** 一目均衡表単体(6シグナルの平均 ±40 で買い/売り)の実績 */
+export function ichiMetrics(ev: { x: Features; spot: number; actualSpot: number }[]) {
+  let calls = 0, hits = 0;
+  for (const e of ev) {
+    const keys = ["ichiTk", "ichiCloud", "ichiChikou", "ichiFuture", "ichiSlope", "ichiWave"] as const;
+    if (keys.every((k) => (e.x[k] ?? 0) === 0)) continue; // 一目導入前のサンプル
+    const score = (keys.reduce((a, k) => a + (e.x[k] ?? 0), 0) / keys.length) * 100;
+    if (Math.abs(score) < 40) continue;
+    calls++;
+    if ((score > 0) === (e.actualSpot > e.spot)) hits++;
+  }
+  return { calls, hits, hitRate: calls ? hits / calls : null };
 }

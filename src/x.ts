@@ -102,7 +102,7 @@ const yen = (n: number) => Math.round(n).toLocaleString("ja-JP");
 export interface LastResult { tradeDate: string; call: "up" | "down" | "flat"; up: boolean; change: number }
 
 export function composeDailyTweet(a: DailyAnalysis, siteUrl: string, p?: Prediction, last?: LastResult, fg?: { nikkei?: number | null; cnn?: number | null }): string {
-  const callLabel = (c: string) => (c === "up" ? "上昇" : c === "down" ? "下落" : "中立");
+  const callLabel = (c: string) => (c === "up" ? "買い" : c === "down" ? "売り" : "様子見");
   const m = `${Number(a.front.month.slice(4))}月限`;
   const lines = [
     `【日経225OP 日次 ${a.tradeDate.slice(5).replace("-", "/")}】`,
@@ -111,8 +111,9 @@ export function composeDailyTweet(a: DailyAnalysis, siteUrl: string, p?: Predict
     a.putWall && a.callWall ? `建玉の壁 下${yen(a.putWall.strike)} / 上${yen(a.callWall.strike)}` : "",
     a.maxPain ? `最大苦痛 ${yen(a.maxPain)} / P/C比 ${a.pcr.toFixed(2)}` : `P/C比 ${a.pcr.toFixed(2)}`,
     fg && (fg.nikkei != null || fg.cnn != null) ? `F&G 日経${fg.nikkei != null ? Math.round(fg.nikkei) : "—"} / 米国${fg.cnn != null ? Math.round(fg.cnn) : "—"}` : "",
-    p ? `翌営業日: ${callLabel(p.call)}(上昇確率${Math.round(p.pUp * 100)}%) ${yen(p.rangeLo)}〜${yen(p.rangeHi)}` : "",
-    last && last.call !== "flat" ? `前回予測: ${callLabel(last.call)}→${last.up ? "上昇" : "下落"}${(last.call === "up") === last.up ? "◯" : "×"}` : "",
+    a.ichimoku ? `一目: ${a.ichimoku.result.judgment}(${Math.round(a.ichimoku.result.score)}) ${a.ichimoku.result.wave}${a.ichimoku.result.sanyaku ? " " + a.ichimoku.result.sanyaku : ""}` : "",
+    p ? `総合判断: ${callLabel(p.call)}(上昇確率${Math.round(p.pUp * 100)}%) ${yen(p.rangeLo)}〜${yen(p.rangeHi)}` : "",
+    last && last.call !== "flat" ? `前回: ${callLabel(last.call)}→${last.up ? "上昇" : "下落"}${(last.call === "up") === last.up ? "◯" : "×"}` : "",
     "※機械的推計・投資助言ではありません",
     "#日経225オプション",
     siteUrl,

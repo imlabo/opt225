@@ -7,6 +7,8 @@ import { writeFileSync } from "node:fs";
 import { analyzeDaily, type DailyInput } from "../src/daily.ts";
 import { OI_PAGE, OI_RE, RB_PAGE, RB_RE, buildDailyInput, decodeSjis, findLink, parseOiWorkbook, parseSettlementCsv } from "../src/jpx-daily.ts";
 import { computeNikkeiFg, parseCnn, parseNikkeiCsv, type CnnFg, type Point } from "../src/sentiment.ts";
+import { parseNikkeiOhlc } from "../src/ichimoku.ts";
+import { buildIchimoku } from "../src/ichimoku-payload.ts";
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36";
 const NK_CSV = "https://indexes.nikkei.co.jp/nkave/historical/nikkei_stock_average_daily_jp.csv";
@@ -52,9 +54,17 @@ try {
   console.log(`::error title=JPX daily::${e}`);
 }
 
-// ---- 2) 市場心理 ----
+// ---- 2) 市場心理 / 一目均衡表 ----
+let nkText = "";
+try { nkText = decodeSjis(new Uint8Array(await (await get(NK_CSV)).arrayBuffer())); } catch (e) { console.log(`::error title=Nikkei CSV::${e}`); }
+
+if (input && nkText) {
+  try { input.ichimoku = buildIchimoku(parseNikkeiOhlc(nkText), input.tradeDate, input.spot); }
+  catch (e) { console.log(`::error title=Ichimoku::${e}`); }
+}
+
 try {
-  const prices = parseNikkeiCsv(decodeSjis(new Uint8Array(await (await get(NK_CSV)).arrayBuffer())));
+  const prices = parseNikkeiCsv(nkText);
   const vi = parseNikkeiCsv(decodeSjis(new Uint8Array(await (await get(VI_CSV)).arrayBuffer())));
   // 日経 CSV がまだ当日分を含まない場合は JPX の原資産価格で補う
   if (input && prices.length && prices[prices.length - 1].date < input.tradeDate) prices.push({ date: input.tradeDate, value: input.spot });

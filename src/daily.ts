@@ -12,6 +12,18 @@ export interface DailyStrike {
   callOi?: number; callChg?: number; callVol?: number; callPx?: number; callIv?: number;
 }
 
+import type { Backtest, Ichimoku } from "./ichimoku";
+
+/** 一目均衡表(GitHub Actions で計算して日次データに同梱) */
+export interface IchimokuPayload {
+  result: Ichimoku; // 日経平均(現物)ベース
+  barsSource: "nikkei" | "nikkei+jpx"; // 当日足を JPX の終値で補った場合 nikkei+jpx
+  backtest: Backtest;
+  prior: Record<string, number>; // バックテストで学習した一目特徴量の重み(予測モデルの事前仮説)
+  chart: { date: string; high: number; low: number; open: number; close: number; tenkan?: number; kijun?: number; spanA?: number; spanB?: number }[];
+  futureCloud: { date: string; spanA: number; spanB: number }[]; // 26 本先まで
+}
+
 export interface DailyInput {
   tradeDate: string; // YYYY-MM-DD
   spot: number; // 日経平均(原資産価格)
@@ -19,6 +31,7 @@ export interface DailyInput {
   months: { month: string; days: number }[]; // オプション限月と SQ までの残日数
   strikes: DailyStrike[];
   sources?: string[];
+  ichimoku?: IchimokuPayload;
 }
 
 export interface DailyAnalysis {
@@ -40,6 +53,7 @@ export interface DailyAnalysis {
   topCallAdds: { strike: number; chg: number }[];
   prev?: { tradeDate: string; pcr: number; atmIv: number | null; spot: number };
   seller?: SellerPnl;
+  ichimoku?: IchimokuPayload & { basis: number }; // basis = 先物 − 現物(先物換算用)
   comment: string;
 }
 
@@ -149,6 +163,7 @@ export function analyzeDaily(d: DailyInput, prev?: DailyAnalysis): DailyAnalysis
     callWall: callWall && { strike: callWall.strike, oi: callWall.callOi! },
     maxPain, topPutAdds: top("putChg"), topCallAdds: top("callChg"),
     seller: sellerPnl(rows, d.spot),
+    ichimoku: d.ichimoku && { ...d.ichimoku, basis: fut ? fut.price - d.spot : 0 },
     prev: prev && { tradeDate: prev.tradeDate, pcr: prev.pcr, atmIv: prev.atmIv, spot: prev.spot },
     comment: "",
   };

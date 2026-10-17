@@ -1,5 +1,5 @@
 import type { DailyAnalysis } from "./daily";
-import { SIGNAL_KEYS } from "./ichimoku";
+import { BASIC_NUMBERS, SIGNAL_KEYS, type Targets } from "./ichimoku";
 
 const yen = (n: number) => Math.round(n).toLocaleString("ja-JP");
 const pct = (h: number, n: number) => (n ? `${((h / n) * 100).toFixed(1)}%` : "—");
@@ -61,18 +61,43 @@ function chart(ic: IchiView): string {
     return `<circle cx="${x(p.k).toFixed(1)}" cy="${y(p.price).toFixed(1)}" r="${lab ? 3.5 : 2.5}" class="${lab ? "ic-pv-abc" : "ic-pv"}"><title>${p.date} ${p.type === "high" ? "高値" : "安値"} ${yen(p.price)}${p.confirmed ? "" : "(未確定)"}</title></circle>` +
       (lab ? `<text x="${x(p.k).toFixed(1)}" y="${(y(p.price) + dy).toFixed(1)}" text-anchor="middle" class="ic-pv-t">${lab}</text>` : "");
   }).join("");
-  // 時間論: 変化日の候補(当日の該当と、10営業日以内の次候補)を縦線で表示
+  // 時間論: 変化日の候補を縦線で表示(当日の該当と 10 営業日以内の次候補、同じ日はまとめる)。基準日は tooltip に
   const tm = ic.result.time;
+  const md = (d: string) => d.slice(5).replace("-", "/");
+  const basis = (u: { from: string; fromType: "high" | "low"; number: number }) => `${md(u.from)}${u.fromType === "high" ? "高値" : "安値"}から${u.number}日目`;
+  let vn = 0; // ラベルが重ならないよう 2 段に振り分け
   const vline = (k: number, label: string, cls: string, title: string) =>
-    `<line x1="${x(k).toFixed(1)}" x2="${x(k).toFixed(1)}" y1="12" y2="${H - 22}" class="${cls}"><title>${title}</title></line><text x="${x(k).toFixed(1)}" y="9" text-anchor="middle" class="ic-time-t">${label}</text>`;
-  const changeDays = (tm.hits.length ? vline(bars.length - 1, "変化日", "ic-time-hit", tm.hits.map((h) => `${h.from}の${h.fromType === "high" ? "高値" : "安値"}から${h.bars}日目(基本数値${h.number})`).join(" / ")) : "") +
-    tm.upcoming.map((u) => vline(bars.length - 1 + u.inBars, String(u.number), "ic-time", `${u.inBars}営業日後: ${u.from}から${u.number}日目`)).join("");
+    `<line x1="${x(k).toFixed(1)}" x2="${x(k).toFixed(1)}" y1="22" y2="${H - 22}" class="${cls}"><title>${title}</title></line><text x="${x(k).toFixed(1)}" y="${vn++ % 2 ? 20 : 9}" text-anchor="middle" class="ic-time-t">${label}</text>`;
+  const byDay = new Map<number, typeof tm.upcoming>();
+  for (const u of tm.upcoming) byDay.set(u.inBars, [...(byDay.get(u.inBars) ?? []), u]);
+  const changeDays = (tm.hits.length ? vline(bars.length - 1, "変化日", "ic-time-hit", `本日: ${tm.hits.map(basis).join(" / ")}`) : "") +
+    [...byDay].map(([inBars, us]) => vline(bars.length - 1 + inBars, us.map((u) => u.number).join("·"), "ic-time", `${md(us[0].date)}: ${us.map(basis).join(" / ")}`)).join("");
   const yt = [0, 0.25, 0.5, 0.75, 1].map((r) => min + (max - min) * r).map((v) => `<text x="2" y="${y(v) + 4}">${(v / 1000).toFixed(1)}k</text>`).join("");
   const xt = bars.filter((_, i) => i % 20 === 0).map((b) => `<text x="${x(bars.indexOf(b))}" y="${H - 8}" text-anchor="middle">${b.date.slice(5).replace("-", "/")}</text>`).join("");
   return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="一目均衡表 日足">${yt}${xt}${cloud}${candles}${line("tenkan", "ic-tenkan")}${line("kijun", "ic-kijun")}
     ${chikou.length > 1 ? `<path d="M${chikou.join("L")}" class="ic-chikou"/>` : ""}
     ${t ? tline(t.N, "N") + tline(t.E, "E") + tline(t.V, "V") : ""}${changeDays}${wave}
     <text x="${W - 12}" y="${H - 8}" text-anchor="end"><tspan class="ic-tenkan-t">━ 転換線</tspan> <tspan class="ic-kijun-t">━ 基準線</tspan> <tspan class="ic-chikou-t">━ 遅行スパン</tspan> <tspan class="ic-wave-t">━ 波動(A→B→C)</tspan> <tspan class="ic-time-t">┆ 変化日</tspan></text></svg>`;
+}
+
+const DOW = ["日", "月", "火", "水", "木", "金", "土"];
+const md = (d: string) => d.slice(5).replace("-", "/");
+
+/** 計算値: 基準の A・B・C と算式を明示する */
+function targetsBlock(t: Targets, close: number, basis: number): string {
+  const up = t.direction === "up";
+  const pt = (p: Targets["a"], name: string) => `<strong>${name}</strong> ${md(p.date)} ${p.type === "high" ? "高値" : "安値"} ${yen(p.price)}${p.confirmed ? "" : "<small class=\"muted\">(未確定・進行中)</small>"}`;
+  const ab = Math.abs(t.b.price - t.a.price), bc = Math.abs(t.b.price - t.c.price), ac = Math.abs(t.c.price - t.a.price);
+  const sgn = up ? "+" : "−";
+  const rows: [string, number, string][] = [
+    ["N", t.N, `C ${sgn} (B − A) = ${yen(t.c.price)} ${sgn} ${yen(ab)}`],
+    ["V", t.V, `B ${sgn} (B − C) = ${yen(t.b.price)} ${sgn} ${yen(bc)}`],
+    ["E", t.E, `B ${sgn} (B − A) = ${yen(t.b.price)} ${sgn} ${yen(ab)}`],
+    ["NT", t.NT, `C ${sgn} (C − A) = ${yen(t.c.price)} ${sgn} ${yen(ac)}`],
+  ];
+  return `<h4>計算値(${up ? "上昇" : "下落"}目標)</h4>
+    <p class="small">基準: ${pt(t.a, "A")} → ${pt(t.b, "B")} → ${pt(t.c, "C")}。A→B が第1波(${yen(ab)}円)、B→C が${up ? "押し" : "戻し"}(${yen(bc)}円 = 第1波の ${Math.round(t.retrace * 100)}%)、C からの第3波の到達目標を計算。${t.cTentative ? `C は反転が未確定の進行中の極値です。${up ? "下落" : "上昇"}が続けば C と計算値は更新されます。` : ""}</p>
+    <div class="kpis">${rows.map(([k, v, f]) => `<div class="kpi"><span>${k}計算値</span><strong>${yen(v)}</strong><small>${f}<br>先物 ${yen(v + basis)} / 現値比 ${v >= close ? "+" : "−"}${yen(Math.abs(v - close))}</small></div>`).join("")}</div>`;
 }
 
 export function renderIchimokuSection(ic: IchiView | undefined): string {
@@ -98,10 +123,13 @@ export function renderIchimokuSection(ic: IchiView | undefined): string {
       <tr><td>五線の値</td><td colspan="2" class="wrap">転換線 ${f(r.lines.tenkan)} / 基準線 ${f(r.lines.kijun)} / 雲 ${yen(Math.min(r.lines.spanA, r.lines.spanB))}〜${yen(Math.max(r.lines.spanA, r.lines.spanB))} / 遅行スパン 26日前 高${yen(r.chikouRef.high)} 安${yen(r.chikouRef.low)}</td></tr>
     </tbody></table></div>
     <h4>波動論(3波動): ${r.wave}</h4><p class="small">転換点: ${pv}</p>
-    ${t ? `<h4>計算値(${t.direction === "up" ? "上昇" : "下落"}目標) A ${yen(t.a.price)} → B ${yen(t.b.price)} → C ${yen(t.c.price)}</h4>
-    <div class="kpis">${(["N", "V", "E", "NT"] as const).map((k) => `<div class="kpi"><span>${k}計算値</span><strong>${yen(t[k])}</strong><small>先物 ${yen(t[k] + basis)} / 現値比 ${t[k] >= r.close ? "+" : "−"}${yen(Math.abs(t[k] - r.close))}</small></div>`).join("")}</div>` : ""}
+    ${t ? targetsBlock(t, r.close, basis) : `<h4>計算値</h4><p class="small">転換点が 3 つそろうと表示します。</p>`}
     <h4>時間論(基本数値)</h4>
-    <p class="small">${r.time.hits.length ? `本日は変化日の候補: ${r.time.hits.map((h) => `${h.from.slice(5).replace("-", "/")}の${h.fromType === "high" ? "高値" : "安値"}から${h.bars}日目(基本数値${h.number})`).join("、")}` : "本日は基本数値に該当なし"}。${r.time.upcoming.length ? `次の候補: ${r.time.upcoming.map((u) => `${u.inBars}営業日後(${u.from.slice(5).replace("-", "/")}から${u.number}日目)`).join("、")}` : ""}</p>
+    <p class="small">${r.time.hits.length
+      ? `<strong>本日 ${md(r.date)} は変化日の候補</strong>: ${r.time.hits.map((h) => `${md(h.from)}の${h.fromType === "high" ? "高値" : "安値"}(${yen(h.fromPrice)})を 1 日目として ${h.bars} 日目 = 基本数値 ${h.number}${h.offset ? "(前日がちょうど)" : ""}`).join("、")}`
+      : `本日 ${md(r.date)} は基本数値に該当なし`}。</p>
+    ${r.time.upcoming.length ? `<div class="table-wrap"><table><thead><tr><th>次の変化日候補</th><th>基準日(起算日)</th><th>基本数値</th></tr></thead><tbody>${r.time.upcoming.map((u) => `<tr><td>${md(u.date)}(${DOW[new Date(u.date + "T00:00:00Z").getUTCDay()]}) <small class="muted">${u.inBars}営業日後</small></td><td>${md(u.from)} ${u.fromType === "high" ? "高値" : "安値"} ${yen(u.fromPrice)}</td><td>${u.number}日目</td></tr>`).join("")}</tbody></table></div>` : ""}
+    <p class="small muted">日数は基準日を 1 日目として営業日(ローソク足の本数)で数え、基本数値 ${BASIC_NUMBERS.slice(0, 8).join("・")}… に当たる日(前日がちょうどの場合も含む)を候補とします。候補日の日付は土日のみ除いた概算で、祝日は考慮していません。</p>
     <h4>相場水準(支持・抵抗)</h4>
     <div class="table-wrap"><table><thead><tr><th>水準</th><th>日経平均(先物換算)</th><th>現値との差</th></tr></thead><tbody>${levels}</tbody></table></div>
     <h4>バックテスト(${bt.from}〜${bt.to}, ${bt.n}日)</h4>

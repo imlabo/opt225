@@ -32,21 +32,23 @@ export function futureCloudAt(bars: Bar[], i: number) {
 
 export interface Pivot { i: number; date: string; price: number; type: "high" | "low"; confirmed: boolean }
 
+/** ジグザグの反転幅: max(3%, 2.5×ATR14) */
+export function reversalThreshold(bars: Bar[], k: number): number {
+  let s = 0, n = 0;
+  for (let i = Math.max(1, k - 13); i <= k; i++) {
+    s += Math.max(bars[i].high - bars[i].low, Math.abs(bars[i].high - bars[i - 1].close), Math.abs(bars[i].low - bars[i - 1].close)); n++;
+  }
+  return Math.max(0.03 * bars[k].close, 2.5 * (n ? s / n : 0));
+}
+
 /** ジグザグで高値・安値の転換点を抽出。反転幅は max(3%, 2.5×ATR14) */
 export function pivots(bars: Bar[], end = bars.length - 1): Pivot[] {
   const out: Pivot[] = [];
   if (end < 20) return out;
-  const atr = (k: number) => {
-    let s = 0, n = 0;
-    for (let i = Math.max(1, k - 13); i <= k; i++) {
-      s += Math.max(bars[i].high - bars[i].low, Math.abs(bars[i].high - bars[i - 1].close), Math.abs(bars[i].low - bars[i - 1].close)); n++;
-    }
-    return s / n;
-  };
   let dir: 1 | -1 = bars[1].close >= bars[0].close ? 1 : -1;
   let ext = dir === 1 ? { i: 0, p: bars[0].high } : { i: 0, p: bars[0].low };
   for (let i = 1; i <= end; i++) {
-    const th = Math.max(0.03 * bars[i].close, 2.5 * atr(i));
+    const th = reversalThreshold(bars, i);
     if (dir === 1) {
       if (bars[i].high >= ext.p) ext = { i, p: bars[i].high };
       else if (ext.p - bars[i].low >= th) {
@@ -81,37 +83,77 @@ export function classifyWave(pv: Pivot[]): Wave {
   return "P波動(収束)";
 }
 
-export interface Targets { direction: "up" | "down"; a: Pivot; b: Pivot; c: Pivot; N: number; V: number; E: number; NT: number }
+export interface Targets {
+  direction: "up" | "down"; // C からの次の波の向き(C が安値なら上昇目標、高値なら下落目標)
+  a: Pivot; b: Pivot; c: Pivot;
+  cTentative: boolean; // C が未確定の極値(進行中の波)のとき true。波が伸びれば C と計算値も動く
+  retrace: number; // B→C の押し(戻し)幅 ÷ A→B の幅
+  N: number; V: number; E: number; NT: number;
+}
 
-/** 計算値: 直近の確定転換点 A→B→C から次の波の目標値 */
-export function targets(pv: Pivot[]): Targets | null {
-  const c = pv.filter((p) => p.confirmed);
-  if (c.length < 3) return null;
-  const [A, B, C] = c.slice(-3);
+/**
+ * 計算値: A→B→C から次の波(C→D)の目標値。A→B が第1波、B→C が押し(戻し)、C→D が第3波。
+ *  N = C + (B − A)  V = B + (B − C)  E = B + (B − A)  NT = C + (C − A)  (下落目標は符号を反転)
+ * C は原則として直近の確定転換点だが、その後の進行中の波が反転幅(ジグザグのしきい値)以上動いていれば
+ * 未確定の極値を C とみなし、そこからの次の波の目標を出す(例: 高値から 9% 下げた時点なら、その安値を押し目 C として上昇目標)。
+ */
+export function targets(pv: Pivot[], bars?: Bar[], end?: number): Targets | null {
+  const conf = pv.filter((p) => p.confirmed);
+  const tent = pv[pv.length - 1];
+  let abc: Pivot[] | null = null;
+  if (tent && !tent.confirmed && conf.length >= 2 && bars && end != null && end >= 20) {
+    const last = conf[conf.length - 1];
+    if (Math.abs(tent.price - last.price) >= reversalThreshold(bars, end)) abc = [conf[conf.length - 2], last, tent];
+  }
+  if (!abc) {
+    if (conf.length < 3) return null;
+    abc = conf.slice(-3);
+  }
+  const [A, B, C] = abc;
   const direction = C.type === "low" ? "up" : "down";
   const s = direction === "up" ? 1 : -1;
+  const ab = Math.abs(B.price - A.price);
   return {
-    direction, a: A, b: B, c: C,
-    N: C.price + s * Math.abs(B.price - A.price),
+    direction, a: A, b: B, c: C, cTentative: !C.confirmed, retrace: ab ? Math.abs(B.price - C.price) / ab : 0,
+    N: C.price + s * ab,
     V: B.price + s * Math.abs(B.price - C.price),
-    E: B.price + s * Math.abs(B.price - A.price),
+    E: B.price + s * ab,
     NT: C.price + s * Math.abs(C.price - A.price),
   };
 }
 
-export interface TimeSignal { from: string; fromType: "high" | "low"; bars: number; number: number }
+/** 基準日(転換点)からの日数が基本数値に当たる日。日数は基準日を 1 日目として営業日(本数)で数える */
+export interface TimeSignal {
+  from: string; fromType: "high" | "low"; fromPrice: number; // 基準日(起算日)
+  bars: number; // 当日が基準日から何日目か(基準日 = 1 日目)
+  number: number; // 該当する基本数値
+  offset: number; // bars − number(0 ならちょうど、+1 は前日がちょうど)
+}
+export interface UpcomingTime { date: string; inBars: number; from: string; fromType: "high" | "low"; fromPrice: number; number: number }
 
-/** 時間論: 主要転換点からの経過本数が基本数値(±1)に当たるか */
-export function timeSignals(pv: Pivot[], end: number, bars: Bar[]): { hits: TimeSignal[]; upcoming: { from: string; number: number; inBars: number }[] } {
-  const hits: TimeSignal[] = [], upcoming: { from: string; number: number; inBars: number }[] = [];
-  for (const p of pv.filter((x) => x.confirmed).slice(-4)) {
-    const n = end - p.i;
+/** 営業日(土日除く。祝日は未考慮)を n 本進めた日付 */
+export function addTradingDays(date: string, n: number): string {
+  const d = new Date(date + "T00:00:00Z");
+  for (let k = 0; k < n; k++) do d.setUTCDate(d.getUTCDate() + 1); while (d.getUTCDay() === 0 || d.getUTCDay() === 6);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * 時間論: 直近 6 つの確定転換点を基準日とし、基準日を 1 日目として数えた日数が基本数値(±1)に当たる日を探す。
+ * hits = 当日が該当、upcoming = 10 営業日以内に該当する日(日付は土日のみ除いた概算。祝日は未考慮)
+ */
+export function timeSignals(pv: Pivot[], end: number, bars: Bar[]): { hits: TimeSignal[]; upcoming: UpcomingTime[] } {
+  const hits: TimeSignal[] = [], upcoming: UpcomingTime[] = [];
+  for (const p of pv.filter((x) => x.confirmed).slice(-6)) {
+    const n = end - p.i + 1; // 基準日を 1 日目とする
     for (const b of BASIC_NUMBERS) {
-      if (Math.abs(n - b) <= 1) hits.push({ from: p.date, fromType: p.type, bars: n, number: b });
-      else if (b > n && b - n <= 10) upcoming.push({ from: bars[p.i].date, number: b, inBars: b - n });
+      // 当日がちょうど(offset 0)か前日がちょうど(offset +1)なら当日を候補に。ちょうどの日がまだ先なら upcoming に日付で示す
+      if (n === b || n === b + 1) hits.push({ from: p.date, fromType: p.type, fromPrice: p.price, bars: n, number: b, offset: n - b });
+      else if (b > n && b - n <= 10) upcoming.push({ date: addTradingDays(bars[end].date, b - n), inBars: b - n, from: p.date, fromType: p.type, fromPrice: p.price, number: b });
     }
   }
-  return { hits, upcoming: upcoming.sort((a, b) => a.inBars - b.inBars).slice(0, 3) };
+  hits.sort((a, b) => Math.abs(a.offset) - Math.abs(b.offset) || b.number - a.number);
+  return { hits, upcoming: upcoming.sort((a, b) => a.inBars - b.inBars || b.number - a.number).slice(0, 6) };
 }
 
 export interface IchimokuSignal {
@@ -173,7 +215,7 @@ export function ichimoku(bars: Bar[]): Ichimoku | null {
   const signal = signalAt(bars, i, pv)!;
   const score = scoreOf(signal);
   const close = bars[i].close;
-  const t = targets(pv);
+  const t = targets(pv, bars, i);
   const top = Math.max(L.spanA, L.spanB), bot = Math.min(L.spanA, L.spanB);
   const levels: Ichimoku["levels"] = [
     { price: L.tenkan, label: "転換線" }, { price: L.kijun, label: "基準線(26日半値)" },

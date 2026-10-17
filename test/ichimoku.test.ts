@@ -46,9 +46,20 @@ describe("wave / targets / time", () => {
   });
   it("flags basic numbers from pivots", () => {
     const last = pv.filter((p) => p.confirmed).at(-1)!;
-    const end = last.i + 26;
+    const end = last.i + 25; // 基準日を 1 日目として 26 日目
     const t = timeSignals(pv, end, mk(Array(end + 1).fill(100)));
-    expect(t.hits.some((h) => h.number === 26 && h.bars === 26)).toBe(true);
+    expect(t.hits.some((h) => h.number === 26 && h.bars === 26 && h.offset === 0 && h.from === last.date)).toBe(true);
+    expect(t.upcoming.every((u) => u.date > t.hits[0].from && u.inBars >= 1)).toBe(true);
+  });
+  it("uses the in-progress extreme as C when the current leg is large enough", () => {
+    const P = (type: "high" | "low", price: number, i: number, confirmed = true): Pivot => ({ i, date: `d${i}`, price, type, confirmed });
+    const flat = mk(Array(60).fill(100));
+    // 進行中の下落が 10% なら未確定の安値を C とした上昇目標
+    const t = targets([P("high", 110, 0), P("low", 100, 10), P("high", 130, 20), P("low", 117, 30, false)], flat, 59)!;
+    expect(t).toMatchObject({ direction: "up", cTentative: true, N: 147, V: 143, E: 160, NT: 134 });
+    // 進行中の動きが小さければ確定済みの 3 点から
+    const u = targets([P("high", 110, 0), P("low", 100, 10), P("high", 130, 20), P("low", 129, 30, false)], flat, 59)!;
+    expect(u).toMatchObject({ direction: "down", cTentative: false, N: 120 });
   });
   it("produces full result and backtest", () => {
     const r = ichimoku(bars)!;

@@ -1,5 +1,6 @@
 import { Hono } from "hono";
-import { loadAnalyses, loadDailyAnalyses, loadDailyStrikes, loadEvaluated, loadHistory, loadLatestPrediction, loadModelLogs, loadSentiment, saveSentiment, type SentimentPayload } from "./db";
+import { analyze } from "./analysis";
+import { loadAnalyses, saveAnalysis, loadDailyAnalyses, loadDailyStrikes, loadEvaluated, loadHistory, loadLatestPrediction, loadModelLogs, loadSentiment, saveSentiment, type SentimentPayload } from "./db";
 import type { DailyInput } from "./daily";
 import { decodeJpx, parseWeeklyCsv } from "./jpx";
 import { analyzeAndPost, ingestDaily, ingestManual, runPipeline } from "./pipeline";
@@ -63,6 +64,13 @@ app.post("/admin/ingest", async (c) => {
   }
   await ingestManual(c.env, w);
   return c.json(c.req.query("post") === "1" ? await analyzeAndPost(c.env) : { ok: true });
+});
+
+/** 保存済みの週次データを再分析(投稿はしない)。分析ロジック変更後のデプロイ時に使用 */
+app.post("/admin/reanalyze", async (c) => {
+  const history = await loadHistory(c.env, undefined, 500);
+  for (let i = 0; i < history.length; i++) await saveAnalysis(c.env, analyze(history.slice(0, i + 1)));
+  return c.json({ weeks: history.length });
 });
 
 /** 市場心理指数の投入(GitHub Actions の scripts/daily-fetch.mts から) */

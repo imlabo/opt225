@@ -31,6 +31,16 @@ export interface InvestorMetrics {
   optionNetSell: number; // (売り−買い) コール+プット。正ならオプション売り越し(ショート・ボラ)
   position: number; // 直近 POSITION_WINDOW 週の directional 累積
   z: number; // position の z スコア
+  short: ShortEstimate; // 売りポジションの推定
+}
+
+/** 売りポジションの推定(週次の売買から) */
+export interface ShortEstimate {
+  callSell: number; callBuy: number; putSell: number; putBuy: number; // 当週の枚数
+  estCallShort: number; // 直近 POSITION_WINDOW 週の (コール売り−買い) 累計。正なら売り越し
+  estPutShort: number; // 同 プット
+  callPremiumNet: number | null; // 直近 POSITION_WINDOW 週の (売り代金−買い代金) 円。正ならプレミアム受け取り超
+  putPremiumNet: number | null;
 }
 
 export interface Analysis {
@@ -89,8 +99,10 @@ export function analyze(history: WeekData[]): Analysis {
     const series = rolling(inv);
     const pop = series.slice(Math.max(0, idx - Z_WINDOW + 1), idx + 1);
     const m = weekMetrics(target.flows, inv);
-    return { investor: inv, label: INVESTOR_LABEL[inv], ...m, position: series[idx], z: zscore(series[idx], pop) };
+    return { investor: inv, label: INVESTOR_LABEL[inv], ...m, position: series[idx], z: zscore(series[idx], pop), short: undefined as unknown as ShortEstimate };
   });
+
+  for (const m of investors) m.short = shortEstimate(history, m.investor);
 
   const byInv = (inv: Investor) => investors.find((m) => m.investor === inv)!;
   const contributions = (Object.keys(WEIGHTS) as (keyof typeof WEIGHTS)[]).map((inv) => ({
@@ -117,4 +129,21 @@ export function analyze(history: WeekData[]): Analysis {
     `法人は${dir(corp.position)}(z=${corp.z.toFixed(2)})。総合スコア${score > 0 ? "+" : ""}${score}で「${bias}」、ボラ環境は「${volSignal}」。`;
 
   return { weekEnd: target.weekEnd, score, bias, volSignal, investors, contributions, futNet, comment };
+}
+
+/** 直近 POSITION_WINDOW 週の売り越しを累計し、投資部門別の売りポジションを推定する */
+export function shortEstimate(history: WeekData[], investor: Investor): ShortEstimate {
+  const recent = history.slice(-POSITION_WINDOW);
+  const get = (w: WeekData, p: "call" | "put") => w.flows.find((r) => r.product === p && r.investor === investor);
+  const cur = history[history.length - 1];
+  const c = get(cur, "call"), p = get(cur, "put");
+  const acc = (prod: "call" | "put", f: (r: FlowRow) => number) => sum(recent.map((w) => { const r = get(w, prod); return r ? f(r) : 0; }));
+  const hasValue = (prod: "call" | "put") => recent.every((w) => { const r = get(w, prod); return !r || (r.sellValue != null && r.buyValue != null); });
+  return {
+    callSell: c?.sell ?? 0, callBuy: c?.buy ?? 0, putSell: p?.sell ?? 0, putBuy: p?.buy ?? 0,
+    estCallShort: acc("call", (r) => r.sell - r.buy),
+    estPutShort: acc("put", (r) => r.sell - r.buy),
+    callPremiumNet: hasValue("call") ? acc("call", (r) => (r.sellValue ?? 0) - (r.buyValue ?? 0)) : null,
+    putPremiumNet: hasValue("put") ? acc("put", (r) => (r.sellValue ?? 0) - (r.buyValue ?? 0)) : null,
+  };
 }

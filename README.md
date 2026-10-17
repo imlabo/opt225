@@ -84,10 +84,15 @@ CSV(約4MB)と Excel の解析は Workers 無料枠の CPU 時間(10ms)に収ま
 
 公開 API: `GET /api/sentiment`
 
+## 売りポジション
+- **週次・投資部門別の推定売りポジション**(`shortEstimate`): コール/プットの当週の売り・買い枚数と、直近4週の売り越し累計・受取プレミアム超過(売り代金−買い代金)。部門別建玉は非公表のため売買差からの推定。
+- **日次・売り手の損益**(`sellerPnl`): 期近の行使価格別建玉 × 現在の清算価格から、SQ 時の日経平均ごとの売り手全体の損益(1枚=指数×1,000円)を計算し、プット/コール売り手が損失に転じる価格(損益分岐)と −5%/−10% 時の損益を表示。
+
 ## 管理 API (`Authorization: Bearer ADMIN_TOKEN`)
 | エンドポイント | 内容 |
 |---|---|
 | `POST /admin/run[?force=1&backfill=N]` | 取得→分析→投稿を手動実行 |
+| `POST /admin/reanalyze` | 保存済み週次データの再分析(デプロイ時に自動実行) |
 | `POST /admin/ingest-sentiment` | 市場心理指数の投入(daily ワークフローから) |
 | `POST /admin/ingest-daily[?post=force]` | 日次データ投入(daily ワークフローから) |
 | `POST /admin/ingest[?post=1]` | 週データを JSON で直接投入(JPX レイアウト変更時のフォールバック) |

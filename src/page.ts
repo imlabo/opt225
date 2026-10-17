@@ -10,6 +10,9 @@ import type { Prediction } from "./model";
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 const fmt = (n: number) => (n > 0 ? "+" : "") + Math.round(n).toLocaleString("ja-JP");
+const num = (n: number) => Math.round(n).toLocaleString("ja-JP");
+const shortLabel = (n: number) => (n > 0 ? `${num(n)}枚 売り越し` : n < 0 ? `${num(-n)}枚 買い越し` : "0");
+const okuS = (v: number | null) => (v == null ? "—" : `${v > 0 ? "+" : v < 0 ? "−" : ""}${(Math.abs(v) / 1e8).toFixed(1)}億`);
 const cls = (n: number) => (n > 0 ? "up" : n < 0 ? "down" : "");
 
 function scoreChart(list: Analysis[]): string {
@@ -78,6 +81,17 @@ export function renderPage(opts: {
           <td>${m.z.toFixed(2)}</td><td class="${cls(latest.futNet[m.investor] ?? 0)}">${latest.futNet[m.investor] != null ? fmt(latest.futNet[m.investor]!) : "—"}</td></tr>`,
         )
         .join("")}</tbody></table></div>
+    <h4>推定売りポジション(直近${POSITION_WINDOW}週の売り越し累計)</h4>
+    <div class="table-wrap"><table>
+      <thead><tr><th>部門</th><th>コール 売 / 買<br><small>当週</small></th><th>プット 売 / 買<br><small>当週</small></th><th>コール<br>推定売り越し</th><th>プット<br>推定売り越し</th><th>受取プレミアム超過<br><small>コール / プット</small></th></tr></thead>
+      <tbody>${latest.investors.filter((m) => m.short)
+        .map((m) => `<tr class="${m.investor === "individual" || m.investor === "corporate" ? "focus" : ""}"><td>${esc(m.label)}</td>
+          <td>${num(m.short.callSell)} / ${num(m.short.callBuy)}</td><td>${num(m.short.putSell)} / ${num(m.short.putBuy)}</td>
+          <td class="${m.short.estCallShort > 0 ? "down" : m.short.estCallShort < 0 ? "up" : ""}">${shortLabel(m.short.estCallShort)}</td>
+          <td class="${m.short.estPutShort > 0 ? "down" : m.short.estPutShort < 0 ? "up" : ""}">${shortLabel(m.short.estPutShort)}</td>
+          <td>${okuS(m.short.callPremiumNet)} / ${okuS(m.short.putPremiumNet)}</td></tr>`)
+        .join("")}</tbody></table></div>
+    <p class="muted small">売り越し累計が正なら売りポジション(ショート)を積み上げている推定、負なら買い越し。JPX は部門別の建玉を公表していないため売買差の累計による推定値で、SQ による建玉消滅は考慮していません。受取プレミアム超過は売り代金−買い代金。</p>
     <h4>スコア寄与</h4>
     <ul class="contrib">${latest.contributions
       .map((c) => `<li><span>${esc(c.label)}</span><span class="bar"><i class="${c.value >= 0 ? "bar-up" : "bar-down"}" style="width:${Math.min(100, Math.abs(c.value))}%"></i></span><b class="${cls(c.value)}">${fmt(c.value)}</b></li>`)

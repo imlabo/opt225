@@ -39,7 +39,49 @@ export interface DailyAnalysis {
   topPutAdds: { strike: number; chg: number }[];
   topCallAdds: { strike: number; chg: number }[];
   prev?: { tradeDate: string; pcr: number; atmIv: number | null; spot: number };
+  seller?: SellerPnl;
   comment: string;
+}
+
+/** 期近の売り手全体の SQ 時点損益(円)。現時点の清算価格で売ったとみなした値 */
+export interface SellerPnl {
+  curve: { price: number; put: number; call: number }[];
+  putPremium: number; callPremium: number; // 現時点のプレミアム総額(=売り手の最大利益)
+  putBreakeven: number | null; // これを下回るとプット売り手全体が損失
+  callBreakeven: number | null; // これを上回るとコール売り手全体が損失
+  putAtDown5: number; putAtDown10: number; // 現値から −5% / −10% での プット売り手損益
+  callAtUp5: number; callAtUp10: number;
+}
+
+export const MULTIPLIER = 1000; // 日経225オプション(ラージ)の取引単位
+
+export function sellerPnl(rows: DailyStrike[], spot: number): SellerPnl | undefined {
+  const puts = rows.filter((r) => (r.putOi ?? 0) > 0 && r.putPx != null);
+  const calls = rows.filter((r) => (r.callOi ?? 0) > 0 && r.callPx != null);
+  if (!puts.length && !calls.length) return undefined;
+  const putAt = (S: number) => MULTIPLIER * puts.reduce((acc, r) => acc + r.putOi! * (r.putPx! - Math.max(0, r.strike - S)), 0);
+  const callAt = (S: number) => MULTIPLIER * calls.reduce((acc, r) => acc + r.callOi! * (r.callPx! - Math.max(0, S - r.strike)), 0);
+  const step = 250, lo = Math.floor((spot * 0.8) / step) * step, hi = Math.ceil((spot * 1.2) / step) * step;
+  const curve: SellerPnl["curve"] = [];
+  for (let S = lo; S <= hi; S += step) curve.push({ price: S, put: putAt(S), call: callAt(S) });
+  // 損益分岐: 現値から外側へ向かって初めて負になる価格(線形補間)
+  const cross = (f: (S: number) => number, dir: 1 | -1) => {
+    let prevS = spot, prevV = f(spot);
+    if (prevV < 0) return spot;
+    for (let k = 1; k <= 400; k++) {
+      const S = spot + dir * k * 50, v = f(S);
+      if (v < 0) return prevS + ((S - prevS) * prevV) / (prevV - v);
+      prevS = S; prevV = v;
+    }
+    return null;
+  };
+  return {
+    curve, putPremium: putAt(1e9), callPremium: callAt(0),
+    putBreakeven: puts.length ? cross(putAt, -1) : null,
+    callBreakeven: calls.length ? cross(callAt, 1) : null,
+    putAtDown5: putAt(spot * 0.95), putAtDown10: putAt(spot * 0.9),
+    callAtUp5: callAt(spot * 1.05), callAtUp10: callAt(spot * 1.1),
+  };
 }
 
 const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
@@ -106,6 +148,7 @@ export function analyzeDaily(d: DailyInput, prev?: DailyAnalysis): DailyAnalysis
     putWall: putWall && { strike: putWall.strike, oi: putWall.putOi! },
     callWall: callWall && { strike: callWall.strike, oi: callWall.callOi! },
     maxPain, topPutAdds: top("putChg"), topCallAdds: top("callChg"),
+    seller: sellerPnl(rows, d.spot),
     prev: prev && { tradeDate: prev.tradeDate, pcr: prev.pcr, atmIv: prev.atmIv, spot: prev.spot },
     comment: "",
   };
@@ -127,6 +170,7 @@ export function dailyComment(a: DailyAnalysis): string {
     const d = a.pcr - a.prev.pcr;
     if (Math.abs(d) >= 0.02) parts.push(`期近P/C建玉比は${a.pcr.toFixed(2)}(前日比${d > 0 ? "+" : ""}${d.toFixed(2)})で${d > 0 ? "プット(下落ヘッジ)" : "コール"}側の積み増し。`);
   }
+  if (a.seller?.putBreakeven) parts.push(`プット売り手全体はSQ時に${yen(a.seller.putBreakeven)}円を割ると損失に転じる計算。`);
   if (a.atmIv && a.expectedMove) parts.push(`ATM IV ${a.atmIv.toFixed(1)}%から、SQまでの1σ変動幅は±${yen(a.expectedMove)}円。`);
   return parts.join("");
 }

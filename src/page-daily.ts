@@ -41,6 +41,45 @@ function oiChart(a: DailyAnalysis, strikes: DailyStrike[]): string {
     ${bars}${vline(a.spot, `現値 ${yen(a.spot)}`, "spot")}${a.maxPain ? vline(a.maxPain, `最大苦痛 ${yen(a.maxPain)}`, "pain") : ""}${ticks}</svg>`;
 }
 
+const oku = (v: number) => `${v < 0 ? "−" : v > 0 ? "+" : ""}${Math.abs(v / 1e8).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}億円`;
+
+/** 売り手の SQ 時点損益カーブ(億円) */
+function sellerChart(a: DailyAnalysis): string {
+  const s = a.seller;
+  if (!s || s.curve.length < 3) return "";
+  const pts = s.curve;
+  const W = 720, H = 240, P = 36;
+  const vals = pts.flatMap((p) => [p.put, p.call]);
+  const max = Math.max(...vals, 0), min = Math.max(Math.min(...vals), -Math.max(Math.abs(max) * 3, 1)); // 下方向は見やすい範囲で切る
+  const x = (v: number) => P + ((v - pts[0].price) / (pts[pts.length - 1].price - pts[0].price)) * (W - 2 * P);
+  const y = (v: number) => P / 2 + ((max - Math.max(v, min)) / (max - min || 1)) * (H - P * 1.5);
+  const path = (k: "put" | "call") => pts.map((p, i) => `${i ? "L" : "M"}${x(p.price).toFixed(1)},${y(p[k]).toFixed(1)}`).join("");
+  const vline = (v: number | null, label: string, cls: string, dy = 0) =>
+    v && v >= pts[0].price && v <= pts[pts.length - 1].price
+      ? `<line x1="${x(v)}" x2="${x(v)}" y1="${P / 2}" y2="${H - P}" class="${cls}"/><text x="${x(v) + 4}" y="${P / 2 + 10 + dy}" class="${cls}-t">${label}</text>` : "";
+  const ticks = pts.filter((_, i) => i % Math.ceil(pts.length / 7) === 0)
+    .map((p) => `<text x="${x(p.price)}" y="${H - 18}" text-anchor="middle">${(p.price / 1000).toFixed(1)}k</text>`).join("");
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="売り手の損益">
+    <line x1="${P}" x2="${W - P}" y1="${y(0)}" y2="${y(0)}" class="axis"/><text x="2" y="${y(0) + 4}">0</text>
+    <path d="${path("put")}" class="sp-put"/><path d="${path("call")}" class="sp-call"/>
+    ${vline(a.spot, `現値 ${yen(a.spot)}`, "spot")}${vline(s.putBreakeven, `プット損益分岐 ${s.putBreakeven ? yen(s.putBreakeven) : ""}`, "be", 14)}${vline(s.callBreakeven, `コール損益分岐 ${s.callBreakeven ? yen(s.callBreakeven) : ""}`, "be", 28)}
+    ${ticks}<text x="${W - P}" y="${H - 2}" text-anchor="end"><tspan class="sp-put-t">━ プット売り手</tspan>　<tspan class="sp-call-t">━ コール売り手</tspan></text></svg>`;
+}
+
+function sellerSection(a: DailyAnalysis): string {
+  const s = a.seller;
+  if (!s) return "";
+  const kpi = (label: string, value: string, sub = "") => `<div class="kpi"><span>${label}</span><strong>${value}</strong>${sub ? `<small>${sub}</small>` : ""}</div>`;
+  return `<h4>売り手の損益(SQ時点, ${Number(a.front.month.slice(4))}月限全体)</h4>
+    <div class="kpis">
+      ${kpi("プット売り手が損失に転じる価格", s.putBreakeven ? yen(s.putBreakeven) : "—", s.putBreakeven ? `現値比 ${signed(s.putBreakeven - a.spot)}円 / 受取プレミアム ${oku(s.putPremium)}` : "")}
+      ${kpi("コール売り手が損失に転じる価格", s.callBreakeven ? yen(s.callBreakeven) : "—", s.callBreakeven ? `現値比 ${signed(s.callBreakeven - a.spot)}円 / 受取プレミアム ${oku(s.callPremium)}` : "")}
+      ${kpi("急落時のプット売り手損益", `−5%: ${oku(s.putAtDown5)}`, `−10%: ${oku(s.putAtDown10)} / 急騰+10%時のコール売り手: ${oku(s.callAtUp10)}`)}
+    </div>
+    ${sellerChart(a)}
+    <p class="muted small">現時点の清算価格でオプションを売ったとみなし、SQ時の日経平均ごとに売り手全体の損益を計算(1枚=指数×1,000円)。損益分岐を割り込むと売り手のヘッジ(先物売り・プット買い戻し)が出やすく、下げが加速しやすい価格帯の目安になります。損失が大きい範囲はグラフ下端で省略しています。誰が売り手かの内訳は週次の投資部門別推定を参照。</p>`;
+}
+
 function trend(history: DailyAnalysis[]): string {
   const rows = history.slice(-10).reverse();
   if (rows.length < 2) return "";
@@ -71,6 +110,7 @@ export function renderDailySection(a: DailyAnalysis | undefined, history: DailyA
     <p class="comment">${esc(a.comment)}</p>
     <h4>行使価格別 建玉(${esc(m)}, 500円刻み)</h4>
     ${oiChart(a, strikes)}
+    ${sellerSection(a)}
     <p class="muted small">建玉が当日増えた行使価格: プット ${a.topPutAdds.map((t) => `${yen(t.strike)}(+${yen(t.chg)})`).join("、") || "—"} / コール ${a.topCallAdds.map((t) => `${yen(t.strike)}(+${yen(t.chg)})`).join("、") || "—"}</p>
     ${trend(history)}
   </section>`;
@@ -79,5 +119,7 @@ export function renderDailySection(a: DailyAnalysis | undefined, history: DailyA
 export const DAILY_CSS = `
 .kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:12px 0}@media(max-width:720px){.kpis{grid-template-columns:repeat(2,1fr)}}
 .kpi small{display:block;font-size:12px;color:var(--muted)}.small{font-size:12px}
+.sp-put{fill:none;stroke:var(--down);stroke-width:2}.sp-call{fill:none;stroke:var(--up);stroke-width:2}
+svg tspan.sp-put-t{fill:var(--down)}svg tspan.sp-call-t{fill:var(--up)}.be{stroke:#7c3aed;stroke-dasharray:4 3}.be-t{fill:#7c3aed!important;font-size:10px}
 .spot{stroke:var(--fg);stroke-dasharray:3 3}.spot-t{fill:var(--fg)!important}.pain{stroke:#b7791f;stroke-dasharray:6 3}.pain-t{fill:#b7791f!important}
 `;

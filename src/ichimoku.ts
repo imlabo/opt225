@@ -251,6 +251,69 @@ export interface Ichimoku {
   levels: { price: number; label: string }[]; // 相場水準(価格順)
   support: { price: number; label: string } | null;
   resistance: { price: number; label: string } | null;
+  candidates?: LevelCandidate[]; // 根拠の重なりでまとめた支持・抵抗の候補
+}
+
+/** 支持・抵抗の候補: 近接する水準(±0.4%)を 1 つにまとめ、根拠の数を強さとする */
+export interface LevelCandidate {
+  side: "support" | "resistance";
+  price: number; // 代表値(根拠の平均)
+  lo: number; hi: number; // 含まれる水準の範囲
+  reasons: { price: number; label: string; kind: LevelKind }[];
+  strength: number; // 根拠の数(種類の重複は 1 つに数えない)
+}
+export type LevelKind = "line" | "cloud" | "futureCloud" | "chikou" | "pivot" | "target" | "half" | "round";
+
+/** 相場水準の候補を列挙してまとめる */
+export function levelCandidates(bars: Bar[], i: number, L: Lines, pv: Pivot[], scenarios: Scenario[]): LevelCandidate[] {
+  const close = bars[i].close;
+  const md = (d: string) => d.slice(5).replace("-", "/");
+  const raw: LevelCandidate["reasons"] = [];
+  const add = (price: number, label: string, kind: LevelKind) => { if (Number.isFinite(price) && price > 0) raw.push({ price, label, kind }); };
+  // 五線
+  add(L.tenkan, "転換線(9日半値)", "line"); add(L.kijun, "基準線(26日半値)", "line"); add(hl(bars, i, 52), "52日半値", "line");
+  add(Math.max(L.spanA, L.spanB), "雲の上限", "cloud"); add(Math.min(L.spanA, L.spanB), "雲の下限", "cloud");
+  // 26 日先の雲(先行スパン)
+  const fc = futureCloudAt(bars, i);
+  add(fc.spanA, "26日先の先行スパン1", "futureCloud"); add(fc.spanB, "26日先の先行スパン2", "futureCloud");
+  // 遅行スパン: 26 日前のローソク(終値がここを抜けると遅行スパンの好転・逆転)
+  const ref = bars[i - 26];
+  add(ref.high, `26日前(${md(ref.date)})の高値 = 遅行スパン好転の目安`, "chikou"); add(ref.low, `26日前(${md(ref.date)})の安値 = 遅行スパン逆転の目安`, "chikou");
+  // 転換点(直近 8)
+  for (const p of pv.filter((x) => x.confirmed).slice(-8)) add(p.price, `${md(p.date)}${p.type === "high" ? "高値" : "安値"}`, "pivot");
+  const tent = pv[pv.length - 1];
+  if (tent && !tent.confirmed) add(tent.price, `${md(tent.date)}${tent.type === "high" ? "高値" : "安値"}(未確定)`, "pivot");
+  // 各読みの計算値と半値
+  scenarios.forEach((sc, n) => {
+    const t = sc.t, tag = `読み${n + 1}`;
+    for (const k of ["N", "V", "E", "NT"] as const) add(t[k], `${tag} ${k}計算値`, "target");
+    const ab = [t.a.price, t.b.price], bc = [t.b.price, t.c.price];
+    add((ab[0] + ab[1]) / 2, `${tag} A→B(${md(t.a.date)}→${md(t.b.date)})の半値`, "half");
+    add((bc[0] + bc[1]) / 2, `${tag} B→C(${md(t.b.date)}→${md(t.c.date)})の半値`, "half");
+    if (n === 0) {
+      add(ab[1] + (ab[0] - ab[1]) / 3, `${tag} A→Bの1/3戻し`, "half"); add(ab[1] + ((ab[0] - ab[1]) * 2) / 3, `${tag} A→Bの2/3戻し`, "half");
+      add(bc[1] + (bc[0] - bc[1]) / 3, `${tag} B→Cの1/3`, "half"); add(bc[1] + ((bc[0] - bc[1]) * 2) / 3, `${tag} B→Cの2/3`, "half");
+    }
+  });
+  // 大台(5,000 円刻み、現値 ±12%)
+  for (let r = Math.ceil((close * 0.88) / 5000) * 5000; r <= close * 1.12; r += 5000) add(r, "大台", "round");
+
+  // 現値から ±12% の範囲に絞り、近接する水準をまとめる
+  const within = raw.filter((x) => Math.abs(x.price - close) / close <= 0.12 && Math.abs(x.price - close) / close >= 0.001).sort((a, b) => a.price - b.price);
+  const tol = close * 0.004;
+  const groups: LevelCandidate[] = [];
+  for (const x of within) {
+    const g = groups[groups.length - 1];
+    if (g && x.price - g.hi <= tol && (x.price > close) === (g.lo > close)) { g.reasons.push(x); g.hi = x.price; }
+    else groups.push({ side: x.price > close ? "resistance" : "support", price: 0, lo: x.price, hi: x.price, reasons: [x], strength: 0 });
+  }
+  for (const g of groups) {
+    g.price = g.reasons.reduce((a, r) => a + r.price, 0) / g.reasons.length;
+    g.strength = new Set(g.reasons.map((r) => r.kind)).size + Math.max(0, g.reasons.length - 1) * 0.5;
+    g.reasons.sort((a, b) => Math.abs(a.price - g.price) - Math.abs(b.price - g.price));
+  }
+  // 各サイド、現値に近い順に並べる(強さは表示側で)
+  return groups.sort((a, b) => Math.abs(a.price - close) - Math.abs(b.price - close));
 }
 
 export function signalAt(bars: Bar[], i: number, pv?: Pivot[]): IchimokuSignal | null {
@@ -284,6 +347,7 @@ export function ichimoku(bars: Bar[]): Ichimoku | null {
   const score = scoreOf(signal);
   const close = bars[i].close;
   const t = targets(pv, bars, i);
+  const scenarios = waveScenarios(bars, i, pv);
   const top = Math.max(L.spanA, L.spanB), bot = Math.min(L.spanA, L.spanB);
   const levels: Ichimoku["levels"] = [
     { price: L.tenkan, label: "転換線" }, { price: L.kijun, label: "基準線(26日半値)" },
@@ -299,8 +363,9 @@ export function ichimoku(bars: Bar[]): Ichimoku | null {
     chikouRef: { high: ref.high, low: ref.low, close: ref.close },
     signal, score, judgment: judgmentOf(score),
     sanyaku: signal.tk > 0 && signal.cloud > 0 && signal.chikou > 0 ? "三役好転" : signal.tk < 0 && signal.cloud < 0 && signal.chikou < 0 ? "三役逆転" : null,
-    wave: classifyWave(pv), pivots: pv.slice(-6), targets: t, scenarios: waveScenarios(bars, i, pv), time: timeSignals(pv, i, bars),
+    wave: classifyWave(pv), pivots: pv.slice(-6), targets: t, scenarios, time: timeSignals(pv, i, bars),
     levels, support: below[below.length - 1] ?? null, resistance: above[0] ?? null,
+    candidates: levelCandidates(bars, i, L, pv, scenarios),
   };
 }
 

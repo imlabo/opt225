@@ -90,6 +90,30 @@ function chart(ic: IchiView): string {
 const DOW = ["日", "月", "火", "水", "木", "金", "土"];
 const md = (d: string) => d.slice(5).replace("-", "/");
 
+/** 支持・抵抗の候補: 上下それぞれ現値に近い順に 5 つ、根拠を列挙 */
+function candidatesBlock(r: IchiView["result"], basis: number): string {
+  const cs = r.candidates;
+  if (!cs?.length) return `<p class="small muted">候補は次回の更新から表示されます。</p>`;
+  const KIND: Record<string, string> = { line: "線", cloud: "雲", futureCloud: "先行", chikou: "遅行", pivot: "高安", target: "計算値", half: "半値", round: "大台" };
+  // 近い順に 5 つ + 根拠の重なる強い候補(★★以上)を加えて最大 7 つ、距離順に
+  const pick = (s: "support" | "resistance") => {
+    const all = cs.filter((c) => c.side === s);
+    const sel = new Set([...all.slice(0, 5), ...all.filter((c) => c.strength >= 2).slice(0, 4)]);
+    return [...sel].slice(0, 7).sort((a, b) => Math.abs(a.price - r.close) - Math.abs(b.price - r.close));
+  };
+  const side = (s: "support" | "resistance") => pick(s).map((c) => {
+    const stars = c.strength >= 3 ? "★★★" : c.strength >= 2 ? "★★" : "★";
+    const range = c.hi - c.lo > 1 ? `${yen(c.lo)}〜${yen(c.hi)}` : yen(c.price);
+    return `<tr><td><strong>${range}</strong><br><small class="muted">先物 ${yen(c.price + basis)} / 現値比 ${c.price >= r.close ? "+" : "−"}${yen(Math.abs(c.price - r.close))}</small></td>
+      <td class="${c.strength >= 3 ? (s === "support" ? "up" : "down") : ""}">${stars}</td>
+      <td class="wrap">${c.reasons.map((x) => `<span class="lv-kind">${KIND[x.kind] ?? x.kind}</span> ${x.label} ${yen(x.price)}`).join("<br>")}</td></tr>`;
+  }).join("");
+  const head = `<thead><tr><th>水準(日経平均)</th><th>強さ</th><th>根拠</th></tr></thead>`;
+  return `<p class="small muted">現値 ${yen(r.close)} の上下 12% にある水準(五線・雲・先行スパン・遅行スパンの目安・転換点・各読みの計算値と半値・大台)を集め、±0.4% 以内で重なるものを 1 つの候補にまとめています。根拠の種類が多いほど★が多く、意識されやすい水準です。</p>
+    <h5>上値の候補(抵抗)</h5><div class="table-wrap"><table>${head}<tbody>${side("resistance") || `<tr><td colspan="3" class="muted">なし</td></tr>`}</tbody></table></div>
+    <h5>下値の候補(支持)</h5><div class="table-wrap"><table>${head}<tbody>${side("support") || `<tr><td colspan="3" class="muted">なし</td></tr>`}</tbody></table></div>`;
+}
+
 /** チャートに引く計算値: 進行中の第3波の読みがあればそれ、なければ次の波の第1候補 */
 function scenarioTargets(ic: IchiView): Targets | null {
   return ic.result.scenarios?.[0]?.t ?? ic.result.targets;
@@ -157,8 +181,10 @@ export function renderIchimokuSection(ic: IchiView | undefined): string {
       : `本日 ${md(r.date)} は基本数値に該当なし`}。</p>
     ${r.time.upcoming.length ? `<div class="table-wrap"><table><thead><tr><th>次の変化日候補</th><th>基準日(起算日)</th><th>基本数値</th></tr></thead><tbody>${r.time.upcoming.map((u) => `<tr><td>${md(u.date)}(${DOW[new Date(u.date + "T00:00:00Z").getUTCDay()]}) <small class="muted">${u.inBars}営業日後</small></td><td>${md(u.from)} ${u.fromType === "high" ? "高値" : "安値"} ${yen(u.fromPrice)}</td><td>${u.number}日目</td></tr>`).join("")}</tbody></table></div>` : ""}
     <p class="small muted">日数は基準日を 1 日目として営業日(ローソク足の本数)で数え、基本数値 ${BASIC_NUMBERS.slice(0, 8).join("・")}… に当たる日(前日がちょうどの場合も含む)を候補とします。候補日の日付は土日のみ除いた概算で、祝日は考慮していません。</p>
-    <h4>相場水準(支持・抵抗)</h4>
-    <div class="table-wrap"><table><thead><tr><th>水準</th><th>日経平均(先物換算)</th><th>現値との差</th></tr></thead><tbody>${levels}</tbody></table></div>
+    <h4>相場水準(支持・抵抗の候補)</h4>
+    ${candidatesBlock(r, basis)}
+    <details class="small"><summary>すべての水準を価格順に見る</summary>
+    <div class="table-wrap"><table><thead><tr><th>水準</th><th>日経平均(先物換算)</th><th>現値との差</th></tr></thead><tbody>${levels}</tbody></table></div></details>
     <h4>バックテスト(${bt.from}〜${bt.to}, ${bt.n}日)</h4>
     <p class="small">一目の判断が「買い」だった日の翌日上昇率 ${pct(bt.buy.hit, bt.buy.n)}(${bt.buy.n}日)、5営業日後 ${pct(bt.buy5.hit, bt.buy5.n)} / 「売り」の翌日下落率 ${pct(bt.sell.hit, bt.sell.n)}(${bt.sell.n}日)、5営業日後 ${pct(bt.sell5.hit, bt.sell5.n)}。期間中の翌日上昇率は ${(bt.upRate * 100).toFixed(1)}%、5日後は ${(bt.upRate5 * 100).toFixed(1)}%。各要素の効き方はこの結果から学習した重みとして総合判断に反映し、日々の答え合わせで補正しています。</p>
   </section>`;
@@ -174,6 +200,8 @@ svg tspan.ic-tenkan-t{fill:#e67e22}svg tspan.ic-kijun-t{fill:#2563eb}svg tspan.i
 .ic-wave{stroke:#0ea5e9;stroke-width:1.2;opacity:.8}.ic-wave-abc{stroke:#0ea5e9;stroke-width:2.2}.ic-wave-tmp{stroke:#0ea5e9;stroke-width:1.2;stroke-dasharray:4 3;opacity:.7}
 .ic-sc-main{fill:none;stroke:#0ea5e9;stroke-width:2.4}.ic-sc{fill:none;stroke:#f59e0b;stroke-width:1.4;stroke-dasharray:6 3;opacity:.85}svg text.ic-sc-t{fill:#f59e0b;font-size:10px}
 .scenario{border-left:3px solid #f59e0b55;padding-left:10px;margin:8px 0}.scenario-main{border-left-color:#0ea5e9}
+.lv-kind{display:inline-block;font-size:10px;padding:0 5px;border-radius:8px;background:#88888833;margin-right:2px}
+h5{margin:10px 0 4px;font-size:13px}details.small summary{cursor:pointer;color:#888;margin-top:8px}
 .ic-pv{fill:#0ea5e9}.ic-pv-abc{fill:#0ea5e9;stroke:#fff;stroke-width:1}svg text.ic-pv-t{fill:#0ea5e9;font-size:11px;font-weight:700}svg tspan.ic-wave-t{fill:#0ea5e9}
 .ic-time{stroke:#d946ef;stroke-dasharray:2 3;opacity:.8}.ic-time-hit{stroke:#d946ef;stroke-width:1.5;stroke-dasharray:4 2}svg text.ic-time-t,svg tspan.ic-time-t{fill:#d946ef;font-size:9px}
 `;

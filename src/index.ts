@@ -1,7 +1,10 @@
 import { Hono } from "hono";
 import { analyze } from "./analysis";
-import { loadAnalyses, saveAnalysis, loadDailyAnalyses, loadDailyStrikes, loadEvaluated, loadHistory, loadLatestPrediction, loadModelLogs, loadSentiment, saveSentiment, type SentimentPayload } from "./db";
-import type { DailyInput } from "./daily";
+import { loadAnalyses, saveAnalysis, loadDailyAnalyses, loadDailyStrikes, loadEvaluated, loadHistory, loadLatestPrediction, loadMeta, loadModelLogs, loadSentiment, saveMeta, saveSentiment, updateDailyIchimoku, type SentimentPayload } from "./db";
+import type { DailyInput, IchimokuPayload } from "./daily";
+
+/** /admin/ingest-ichimoku のボディ・fg_meta "ichimoku_latest" の中身 */
+interface IchimokuLatest { tradeDate: string; close: number; ichimoku: IchimokuPayload }
 import { decodeJpx, parseWeeklyCsv } from "./jpx";
 import { analyzeAndPost, ingestDaily, ingestManual, runPipeline } from "./pipeline";
 import { renderPage } from "./page";
@@ -17,10 +20,15 @@ app.get("/", async (c) => {
   const sentiment = await loadSentiment(c.env, 400);
   const dl = dailyHistory[dailyHistory.length - 1];
   const strikes = dl ? await loadDailyStrikes(c.env, dl.tradeDate, dl.front.month) : [];
+  // JPX 未公表の日でも一目均衡表は最新足(Yahoo 補完)で更新されている場合がある
+  const latestIchi = await loadMeta<IchimokuLatest>(c.env, "ichimoku_latest");
+  const ichimoku = latestIchi && (!dl?.ichimoku || latestIchi.tradeDate > dl.ichimoku.result.date)
+    ? { ...latestIchi.ichimoku, basis: dl?.ichimoku?.basis ?? 0 }
+    : dl?.ichimoku;
   c.header("Cache-Control", "public, max-age=300");
   return c.html(renderPage({
     latest: history[history.length - 1], history, week: weeks[0], siteUrl: c.env.SITE_URL,
-    daily: { latest: dl, history: dailyHistory, strikes },
+    daily: { latest: dl, history: dailyHistory, strikes }, ichimoku,
     model: { prediction, recent, logs },
     sentiment,
   }));
@@ -96,6 +104,16 @@ app.post("/admin/ingest-daily", async (c) => {
     evaluatedNow: r.learn.evaluatedNow, model: { n: r.learn.metrics.n, hitRate: r.learn.metrics.hitRate, rangeRate: r.learn.metrics.rangeRate, k: r.learn.k },
     post: r.post.status,
   });
+});
+
+/** 一目均衡表だけの更新(JPX 日次が未公表のとき daily-fetch から)。同日の日次データがあればそちらも差し替える */
+app.post("/admin/ingest-ichimoku", async (c) => {
+  const b = await c.req.json<IchimokuLatest>();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(b.tradeDate ?? "") || !b.ichimoku?.result || b.ichimoku.result.date !== b.tradeDate) return c.json({ error: "invalid body" }, 400);
+  await saveMeta(c.env, "ichimoku_latest", b);
+  if (b.ichimoku.prior) await saveMeta(c.env, "ichimoku_prior", b.ichimoku.prior);
+  const updated = await updateDailyIchimoku(c.env, b.tradeDate, b.ichimoku);
+  return c.json({ tradeDate: b.tradeDate, judgment: b.ichimoku.result.judgment, score: b.ichimoku.result.score, barsSource: b.ichimoku.barsSource, filled: b.ichimoku.filled ?? [], dailyUpdated: updated });
 });
 
 /** JPX の週次 CSV をボディで送って解析結果だけ確認(保存しない) */

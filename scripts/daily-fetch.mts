@@ -7,8 +7,10 @@ import { writeFileSync } from "node:fs";
 import { analyzeDaily, type DailyInput } from "../src/daily.ts";
 import { OI_PAGE, OI_RE, RB_PAGE, RB_RE, buildDailyInput, decodeSjis, findLink, parseOiWorkbook, parseSettlementCsv } from "../src/jpx-daily.ts";
 import { computeNikkeiFg, parseCnn, parseNikkeiCsv, type CnnFg, type Point } from "../src/sentiment.ts";
-import { parseNikkeiOhlc } from "../src/ichimoku.ts";
+import { parseNikkeiOhlc, type Bar } from "../src/ichimoku.ts";
 import { buildIchimoku } from "../src/ichimoku-payload.ts";
+import { latestTradingDate, mergeBars, parseYahooChart, YAHOO_URLS } from "../src/yahoo.ts";
+import type { IchimokuPayload } from "../src/daily.ts";
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36";
 const NK_CSV = "https://indexes.nikkei.co.jp/nkave/historical/nikkei_stock_average_daily_jp.csv";
@@ -58,15 +60,29 @@ try {
 let nkText = "";
 try { nkText = decodeSjis(new Uint8Array(await (await get(NK_CSV)).arrayBuffer())); } catch (e) { console.log(`::error title=Nikkei CSV::${e}`); }
 
-if (input && nkText) {
-  try { input.ichimoku = buildIchimoku(parseNikkeiOhlc(nkText), input.tradeDate, input.spot); }
+// 日経公式 CSV は当日分の反映が遅れるため、最新足は Yahoo Finance(^N225)で補う
+let yahoo: Bar[] = [];
+for (const u of YAHOO_URLS) {
+  try { yahoo = parseYahooChart(await (await get(u)).json()); break; }
+  catch (e) { console.log(`::warning title=Yahoo::${u} ${e}`); }
+}
+const asOf = input?.tradeDate ?? latestTradingDate(); // 対象日: JPX 公表済みならその日、未公表なら直近の取引日
+const merged = mergeBars(parseNikkeiOhlc(nkText), yahoo, asOf);
+const lastBar = merged.bars[merged.bars.length - 1];
+console.log(`bars: nikkei last ${parseNikkeiOhlc(nkText).at(-1)?.date ?? "-"} / yahoo last ${yahoo.at(-1)?.date ?? "-"} / filled [${merged.added.join(",")}] / asOf ${asOf}`);
+
+let ichimoku: IchimokuPayload | undefined;
+if (merged.bars.length) {
+  try { ichimoku = buildIchimoku(merged.bars, asOf, input?.spot ?? null, merged.added); }
   catch (e) { console.log(`::error title=Ichimoku::${e}`); }
 }
+if (input) input.ichimoku = ichimoku;
 
 try {
   const prices = parseNikkeiCsv(nkText);
   const vi = parseNikkeiCsv(decodeSjis(new Uint8Array(await (await get(VI_CSV)).arrayBuffer())));
-  // 日経 CSV がまだ当日分を含まない場合は JPX の原資産価格で補う
+  // 日経 CSV がまだ当日分を含まない場合は Yahoo の終値、無ければ JPX の原資産価格で補う
+  for (const b of merged.bars) if (prices.length && b.date > prices[prices.length - 1].date) prices.push({ date: b.date, value: b.close });
   if (input && prices.length && prices[prices.length - 1].date < input.tradeDate) prices.push({ date: input.tradeDate, value: input.spot });
 
   // 本サイトで蓄積した P/C比・スキュー(公開 API)+ 当日分
@@ -95,3 +111,5 @@ try {
 
 // ---- 3) 日次データ送信 ----
 if (input) await post("/admin/ingest-daily", input);
+// JPX 未公表でも一目均衡表だけは最新足で更新しておく(JPX 公表後の ingest-daily で同じ日付が上書きされる)
+else if (ichimoku && lastBar) await post("/admin/ingest-ichimoku", { tradeDate: asOf, close: lastBar.close, ichimoku });

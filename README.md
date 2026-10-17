@@ -61,7 +61,7 @@ curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" "https://<site>/admin/run"
 
 期近(SQ まで 3 日以上の最も近い限月)について、下の壁(現値以下で最大のプット建玉)、上の壁(現値以上で最大のコール建玉)、最大苦痛価格、P/C建玉比、ATM IV、SQ までの 1σ 変動幅を算出します。日次では投資部門別の内訳は公表されていません。
 
-CSV(約4MB)と Excel の解析は Workers 無料枠の CPU 時間(10ms)に収まらないため、`.github/workflows/daily.yml`(平日 18:30 / 21:30 JST)で `scripts/daily-fetch.mts` が解析し、必要な行だけを `POST /admin/ingest-daily` に送ります。Worker 側で D1 保存・分析・表示・X 投稿(1日1回)を行います。
+CSV(約4MB)と Excel の解析は Workers 無料枠の CPU 時間(10ms)に収まらないため、`.github/workflows/daily.yml`(平日 17:15 / 18:30 / 20:00 / 21:30 / 23:30 JST。JPX の公表待ちで再試行)で `scripts/daily-fetch.mts` が解析し、必要な行だけを `POST /admin/ingest-daily` に送ります。Worker 側で D1 保存・分析・表示・X 投稿(1日1回)を行います。
 
 公開 API: `GET /api/daily/latest`, `GET /api/daily/history`
 
@@ -90,6 +90,8 @@ CSV(約4MB)と Excel の解析は Workers 無料枠の CPU 時間(10ms)に収ま
 
 ## 一目均衡表(日足) (`src/ichimoku.ts`)
 日経平均の日足 4 本値(日経公式 CSV, 2023年〜)で計算し、先物換算はベーシス(先物清算価格−日経平均)を加えて表示。先物の日足履歴は公開データがないため現物ベース。
+日経公式 CSV は当日分の反映が遅れるため、最新足は Yahoo Finance(`^N225` チャート API, `src/yahoo.ts`)で補完(表示に「Yahoo Finance で補完」と明記)。JPX の日次ファイルが未公表の時間帯でも一目均衡表だけ先に更新する(`POST /admin/ingest-ichimoku`)。
+チャートには転換点を結ぶ 3 波動の線(A→B→C は太線)と、時間論の変化日候補(当日の該当・10 営業日以内の次候補)を縦線で描く。
 
 - **五線**: 転換線(9)・基準線(26)・先行スパン1/2(26 本先行)・遅行スパン(26 本遅行)。三役好転/逆転を判定
 - **波動論(3波動)**: ジグザグ(反転幅 max(3%, 2.5×ATR14))で転換点を抽出し、上昇N/下落N/Y(拡大)/P(収束)/V/I に分類
@@ -106,6 +108,7 @@ CSV(約4MB)と Excel の解析は Workers 無料枠の CPU 時間(10ms)に収ま
 | `POST /admin/reanalyze` | 保存済み週次データの再分析(デプロイ時に自動実行) |
 | `POST /admin/ingest-sentiment` | 市場心理指数の投入(daily ワークフローから) |
 | `POST /admin/ingest-daily[?post=force]` | 日次データ投入(daily ワークフローから) |
+| `POST /admin/ingest-ichimoku` | 一目均衡表だけの更新(JPX 未公表時に daily ワークフローから) |
 | `POST /admin/ingest[?post=1]` | 週データを JSON で直接投入(JPX レイアウト変更時のフォールバック) |
 | `POST /admin/parse-preview` | JPX の週次 CSV をボディで送って解析結果のみ確認 (`--data-binary @file.csv`) |
 | `POST /admin/clear-sample` | サンプルデータ削除 |

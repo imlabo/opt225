@@ -1,6 +1,6 @@
 import { ratingOf, type CnnFg, type FgPoint } from "./sentiment";
 import type { Evaluated, Features, Metrics, Prediction, Weights } from "./model";
-import type { DailyAnalysis, DailyInput, DailyStrike } from "./daily";
+import type { DailyAnalysis, DailyInput, DailyStrike, IchimokuPayload } from "./daily";
 import type { Analysis } from "./analysis";
 import type { Env, FlowRow, Product, Investor, WeekData } from "./types";
 
@@ -254,4 +254,14 @@ export async function saveMeta(env: Env, key: string, value: unknown) {
   await env.DB.prepare(
     `INSERT INTO fg_meta (key, value_json) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json, updated_at=datetime('now')`,
   ).bind(key, JSON.stringify(value)).run();
+}
+
+/** 保存済み日次分析の一目均衡表だけを差し替える(同日の行があるときのみ)。戻り値は更新したか */
+export async function updateDailyIchimoku(env: Env, tradeDate: string, ic: IchimokuPayload): Promise<boolean> {
+  const r = await env.DB.prepare("SELECT detail_json FROM daily_snapshots WHERE trade_date = ?").bind(tradeDate).first<{ detail_json: string }>();
+  if (!r) return false;
+  const a = JSON.parse(r.detail_json) as DailyAnalysis;
+  a.ichimoku = { ...ic, basis: a.ichimoku?.basis ?? (a.fut ? a.fut.price - a.spot : 0) };
+  await env.DB.prepare("UPDATE daily_snapshots SET detail_json = ? WHERE trade_date = ?").bind(JSON.stringify(a), tradeDate).run();
+  return true;
 }

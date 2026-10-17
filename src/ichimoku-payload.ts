@@ -3,11 +3,18 @@ import type { IchimokuPayload } from "./daily";
 import { backtest, futureCloudAt, ichimoku, linesAt, type Bar } from "./ichimoku";
 import { fit, ICHI_FEATURES, ichiFeatures, PRIOR, type Features } from "./model";
 
-export function buildIchimoku(bars: Bar[], tradeDate: string, spot: number): IchimokuPayload {
-  let barsSource: IchimokuPayload["barsSource"] = "nikkei";
+/**
+ * @param bars  日経公式 CSV の日足(必要なら Yahoo で補った後のもの)
+ * @param tradeDate 対象日
+ * @param spot  対象日の終値(JPX 原資産価格など)。日足に対象日が無い場合の仮置きに使う。null なら仮置きしない
+ * @param filled Yahoo で補った日付(表示用)
+ */
+export function buildIchimoku(bars: Bar[], tradeDate: string, spot: number | null, filled: string[] = []): IchimokuPayload {
+  let barsSource: IchimokuPayload["barsSource"] = filled.length ? "nikkei+yahoo" : "nikkei";
   bars = bars.filter((b) => b.date <= tradeDate);
   if (!bars.length || bars[bars.length - 1].date < tradeDate) {
-    // 日経 CSV が未更新: 当日足を JPX の終値で仮置き(21:30 の再実行で上書き)
+    if (spot == null) throw new Error(`no bar for ${tradeDate}`);
+    // 日経 CSV も Yahoo も未更新: 当日足を JPX の終値で仮置き(次回の実行で上書き)
     bars.push({ date: tradeDate, open: spot, high: spot, low: spot, close: spot });
     barsSource = "nikkei+jpx";
   }
@@ -31,5 +38,5 @@ export function buildIchimoku(bars: Bar[], tradeDate: string, spot: number): Ich
   }
   const st = bt.stats;
   console.log(`Ichimoku ${result.date} ${result.judgment} score ${result.score.toFixed(0)} wave ${result.wave} (src ${barsSource}) / backtest buy ${st.buy.hit}/${st.buy.n} sell ${st.sell.hit}/${st.sell.n} / prior ${JSON.stringify(prior)}`);
-  return { result, barsSource, backtest: st, prior, chart, futureCloud };
+  return { result, barsSource, filled, backtest: st, prior, chart, futureCloud };
 }

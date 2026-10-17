@@ -27,7 +27,7 @@ jobs:
         if: inputs.fetch != ''
         run: |
           mkdir -p out/files
-          for u in ${{ inputs.fetch }}; do curl -sSL -A "Mozilla/5.0 (compatible; opt225/1.0)" -o "out/files/$(basename "$u")" "$u"; done
+          for u in ${{ inputs.fetch }}; do curl -sSL -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36" -w "%{http_code} %{size_download} %{url_effective}\n" -o "out/files/$(basename "$u")" "$u"; done
           cd out/files && for f in *; do
             case "$f" in *.zip) unzip -o -q "$f" -d "${f%.zip}" ;; esac
           done; ls -laR | head -100

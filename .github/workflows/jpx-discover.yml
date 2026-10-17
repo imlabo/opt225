@@ -10,6 +10,9 @@ on:
       fetch:
         description: "そのまま保存するファイル URL(空白区切り, 省略可)"
         required: false
+      probe:
+        description: "ステータスと先頭だけ記録する URL(空白区切り, 省略可)"
+        required: false
 
 permissions:
   contents: write
@@ -23,6 +26,12 @@ jobs:
         with: { node-version: 22, cache: npm }
       - run: npm ci
       - run: npx tsx scripts/jpx-discover.mts ${{ inputs.args }}
+      - name: Probe URLs
+        if: inputs.probe != ''
+        env:
+          PROBE: ${{ inputs.probe }}
+        run: npx tsx scripts/probe.mts $PROBE
+
       - name: Fetch raw files
         if: inputs.fetch != ''
         run: |

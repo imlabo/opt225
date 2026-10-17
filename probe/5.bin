@@ -1,0 +1,1489 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head prefix="og: http://ogp.me/ns# fb: http://ogp.me/ns/fb# article: http://ogp.me/ns/article#">
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta name="copyright" content="(C) Japan Exchange Group, Inc.">
+
+<meta name="description" content="その他統計資料のページ。東京証券取引所、大阪取引所、東京商品取引所等を運営する日本取引所グループ（JPX）のサイトです。">
+  
+<meta property="og:title" content="その他統計資料 | 日本取引所グループ">
+  
+<meta property="og:type" content="article">
+
+<meta property="og:description" content="その他統計資料のページ。東京証券取引所、大阪取引所、東京商品取引所等を運営する日本取引所グループ（JPX）のサイトです。">
+  
+<meta property="og:image" content="https://www.jpx.co.jp/common/images/other/nlsgeu000000pud7-img/ogp.png">
+  
+<meta property="og:site_name" content="日本取引所グループ">
+<meta property="og:url" content="https://www.jpx.co.jp/markets/statistics-equities/misc/index.html">
+<meta property="og:locale" content="ja_JP">
+<meta property="fb:app_id" content="175272119257459">
+<meta property="twitter:card" content="summary_large_image">
+<meta property="twitter:site" content="@JPX_official">
+<link href="/_assets/img/icon/favicon.ico" rel="shortcut icon" type="image/x-icon">
+<link rel="apple-touch-icon" href="/_assets/img/image/jpx_icon_180x180.png" />
+<link rel="icon" type="image/png" href="/_assets/img/image/jpx_icon_192x192.png">
+
+<title>売買代金順位表・売買高・売買代金 | 統計情報（株式関連） | 日本取引所グループ</title>
+  
+
+<script type="text/javascript" src="/_assets/js/jquery.min.js"></script>
+<link href="/_assets/css/reset.css" rel="stylesheet" type="text/css">
+<link href="/_assets/css/layout.css" rel="stylesheet" type="text/css" media="all">
+<link href="/_assets/css/parts.css" rel="stylesheet" type="text/css">
+<link href="/_assets/css/print.css" rel="stylesheet" type="text/css" media="print">
+<link href="/_assets/css/style_add.css" rel="stylesheet" type="text/css">
+<link href="/_assets/css/probo.css" rel="stylesheet" type="text/css">
+<link href="/_assets/css/probo_add.css" rel="stylesheet" type="text/css">
+
+<link href="/_assets/css/list_add.css" rel="stylesheet" type="text/css">
+<link href="/_assets/css2/lity.css" rel="stylesheet" type="text/css">
+
+      <link href="/_assets/css/prettyPhoto-parts.css" rel="stylesheet" type="text/css">
+    
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@100;300;400;500;700;900&amp;display=swap" rel="stylesheet">
+
+</head>
+<body class="">
+  
+  <!-- body_prepend -->
+  <!-- Google Tag Manager -->
+  <link rel="stylesheet" type="text/css" href="/_assets/css/cookieconsent_customize.css">
+  <script src="//cdnjs.cloudflare.com/ajax/libs/cookieconsent2/3.1.0/cookieconsent.min.js"></script>
+  <script src="/_assets/js2/cookie-accept.js"></script>
+  <noscript>
+  <iframe src="//www.googletagmanager.com/ns.html?id=GTM-MS2WRF" height="0" width="0" style="display:none;visibility:hidden"></iframe>
+  </noscript>
+  <script>
+function startGtm() {
+(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
+  new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
+  j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
+  '//www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
+  })(window,document,'script','dataLayer','GTM-MS2WRF');
+}
+</script> 
+  <!-- End Google Tag Manager -->
+
+  <!-- wrapper-area -->
+  <div id="wrapper-area">
+
+    <!-- ヘッダー出力 -->
+<header class="JPX-header">
+  <div class="JPX-header-label">
+    <div class="JPX-header-label-main">
+      <ul>
+        <li>東京証券取引所</li>
+        <li>大阪取引所</li>
+        <li>東京商品取引所</li>
+        <li>JPX総研</li>
+        <li>日本取引所自主規制法人</li>
+        <li><a href="https://www.jpx.co.jp/jscc/" rel="external">日本証券クリアリング機構</a></li>
+      </ul>
+    </div>
+    <div class="JPX-header-label-link">
+      <a href="/corporate/index.html">JPX企業情報</a>
+    </div>
+  </div>
+  
+  <div class="JPX-header-main-wrapper">
+    <div class="JPX-header-main">
+      <div class="JPX-header-mainInner">
+        <div class="JPX-header-logo">
+          <a href="/">
+            <picture>
+              <source srcset="/_assets/img/image/logo_pc.svg" media="(min-width: 1025px)">
+              <img src="/_assets/img/image/logo_sp.svg" alt="JPX 日本取引所グループ">
+            </picture>
+          </a>
+        </div>
+        <div class="JPX-header-btn">
+            <span></span>
+            <span></span>
+            <span></span>
+        </div>
+      </div>
+
+      <div class="JPX-header-menu">
+
+        <!-- 検索窓 -->
+        <div class="JPX-header-menu-search">
+          <div class="JPX-header-menu-searchInner">
+            <form action="/search.html">
+              <input type="text" id="q2" class="search-input" name="q" value="" placeholder="サイト内検索" />
+              <div class="search-input-btn">
+                <input type="image" src="/_assets/img/svg/icn-search.svg" name="" value="" />
+              </div>
+            </form>
+          </div>
+        </div>
+        <!-- /検索窓 -->
+
+        <!-- PCメニュー全ページ共通（PC） -->
+        
+<a id="global_menu_pc_following_logo_hidden" style="display:none;" href="/index.html"></a>
+<script>
+  $(function (global_menu_third_map_link) {
+    $.ajax({
+      url: "/i15r6c0000003p10.html",
+      type: "GET",
+      dataType: "html",
+      async: false,
+      timeout: 1000,
+      error: function () {
+        $("#global_menu_pc_third_map").html('情報を取得できませんでした。');
+        $("#global_menu_sp_third_map").html('情報を取得できませんでした。');
+      },
+      success: function (html) {
+        let jq = $($.parseHTML(html));
+        let pc = jq.filter("#global_menu_pc_third_map_links").first().html();
+        $("#global_menu_pc_third_map").html(pc);
+        let sp = jq.filter("#global_menu_sp_third_map_links").first().html();
+        $("#global_menu_sp_third_map").prepend($(sp));
+
+        $("#global_menu_pc_following_logo").prop("href", $("#global_menu_pc_following_logo_hidden").prop("href"));
+      }
+    });
+  });
+</script>
+
+<div class="JPX-header-pc-global" id="global_menu_pc_third_map">
+  <nav class="JPX-header-pc-global-menu">
+  <ul>
+    <li class="-is-jpx-link">
+      <a href="#" id="global_menu_pc_following_logo">
+        <picture>
+          <img src="/_assets/img/image/logo_pc_menu.svg" alt="JPX 日本取引所グループ" />
+        </picture>
+      </a>
+    </li>
+    
+      <li data-target-item="pc-menu-0-0">
+        <a href="/news/index.html"><span>ニュース</span></a>
+      </li>
+    
+      
+      <li data-target-item="pc-menu-1-0">
+        <a href="/markets/index.html"><span>マーケット情報</span></a>
+      </li>
+    
+      
+      <li data-target-item="pc-menu-2-0">
+        <a href="/listing/index.html"><span>上場会社情報</span></a>
+      </li>
+    
+      
+      <li data-target-item="pc-menu-3-0">
+        <a href="/equities/index.html"><span>株式・ETF・REIT等</span></a>
+      </li>
+    
+      
+      <li data-target-item="pc-menu-4-0">
+        <a href="/derivatives/index.html"><span>先物・オプション</span></a>
+      </li>
+    
+      
+      <li data-target-item="pc-menu-5-0">
+        <a href="/rules-participants/index.html"><span>規則・取引参加者</span></a>
+      </li>
+    
+      
+      <li data-target-item="pc-menu-6-0">
+        <a href="/systems/index.html"><span>システム</span></a>
+      </li>
+    
+      
+      <li data-target-item="pc-menu-7-0">
+        <a href="/regulation/index.html"><span>自主規制</span></a>
+      </li>
+    
+      
+  </ul>
+</nav>
+  <div class="JPX-header-pc-global-data">
+  </div>
+  <div class="JPX-header-pc-global-shadow"></div>
+</div>
+<!-- /PCメニュー全ページ共通（PC） -->
+
+<!-- SPメニュー -->
+<div class="JPX-header-sp-global">
+  <!-- SP MENU -->
+  <nav class="JPX-header-sp-global-menu">
+    
+      <!-- SP MENUボタン -->
+      <div class="JPX-header-sp-global-ItemBtn">MENU</div>
+      <!-- /SP MENUボタン -->
+    
+    <div class="JPX-header-sp-global-ItemWrap" id="global_menu_sp_third_map">
+      
+<!-- 対象者別 -->
+<div class="JPX-header-menu-target">
+  <ul>
+    
+      <li class="-individual"><a href="/individuals/index.html"><span>個人の方</span></a></li>
+    
+      <li class="-listed"><a href="/listed-companies/index.html"><span>上場会社の方</span></a></li>
+    
+      <li class="-pre"><a href="/pre-listed-companies/index.html"><span>上場検討中の方</span></a></li>
+    
+      <li class="-participants"><a href="/participants/index.html"><span>取引参加者の方</span></a></li>
+    
+      <li class="-nstitutional"><a href="/institutional/index.html"><span>機関投資家の方</span></a></li>
+    
+      <li class="-media"><a href="/media/index.html"><span>報道機関の方</span></a></li>
+    
+  </ul>
+</div>
+<!-- /対象者別 -->
+      
+    </div>
+  </nav>
+  <!-- /SP MENU -->
+  
+  <!-- （SP 第5-6階層） -->
+  
+      <div class="JPX-header-sp-global-links">
+        <div class="JPX-header-sp-global-linksTitle ">
+          <a href="/markets/index.html">マーケット情報</a>
+        </div>
+        
+      <div class="JPX-header-sp-global-linksSubTitle ">
+        <a href="/markets/statistics-equities/index.html">統計情報（株式関連）</a>
+      </div>
+      
+      <div class="JPX-header-sp-global-linksSubSubTitle ">
+        <a href="/markets/statistics-equities/daily/index.html">東京証券取引所日報</a>
+      </div>
+      
+      <div class="JPX-header-sp-global-linksSubSubTitle ">
+        <a href="/markets/statistics-equities/monthly/index.html">統計月報</a>
+      </div>
+      
+      <div class="JPX-header-sp-global-linksSubSubTitle ">
+        <a href="/markets/statistics-equities/price/index.html">月間相場表</a>
+      </div>
+      
+      <div class="JPX-header-sp-global-linksSubSubTitle ">
+        <a href="/markets/statistics-equities/margin/index.html">信用取引残高等</a>
+      </div>
+      
+      <div class="JPX-header-sp-global-linksSubSubTitle ">
+        <a href="/markets/statistics-equities/short-selling/index.html">空売り集計</a>
+      </div>
+      
+      <div class="JPX-header-sp-global-linksSubSubTitle ">
+        <a href="/markets/statistics-equities/investor-type/index.html">投資部門別売買状況</a>
+      </div>
+      
+      <div class="JPX-header-sp-global-linksSubSubTitle ">
+        <a href="/markets/statistics-equities/program/index.html">プログラム売買・裁定取引</a>
+      </div>
+      
+      <div class="JPX-header-sp-global-linksSubSubTitle -is-active">
+        <a href="/markets/statistics-equities/misc/index.html">その他統計資料</a>
+      </div>
+      
+      <div class="JPX-header-sp-global-linksSubSubTitle ">
+        <a href="/markets/statistics-equities/examination/index.html">調査レポート</a>
+      </div>
+      
+  
+      
+        
+      </div>
+    
+  <!-- /（SP 第5-6階層） -->
+
+</div>
+        <!-- /SPメニュー -->
+
+        <!-- その他 -->
+        <div class="JPX-header-menu-other">
+<ul>
+
+<li><a href="/contact/index.html" ><span>お問合せ</span></a></li>
+
+<li><a href="/corporate/learning/education/index.html" ><span>金融経済教育</span></a></li>
+
+<li><a href="/corporate/sustainability/index.html" ><span>サステナビリティ</span></a></li>
+
+</ul>
+</div>
+        <!-- /その他 -->
+
+        <!-- SNS -->
+        <div class="JPX-header-menu-sns">
+          <ul>
+            <li><a href="https://x.com/JPX_official" rel="external"><img src="/_assets/img/svg/icn-sns-tw.svg" alt="X"></a></li>
+            <li><a href="https://www.facebook.com/JapanExchangeGroup" rel="external"><img src="/_assets/img/svg/icn-sns-fb.svg" alt="facebook"></a></li>
+            <li><a href="https://www.instagram.com/jpx_official/" rel="external"><img src="/_assets/img/svg/icn-sns-ig.svg" alt="instagram"></a></li>
+            <li><a href="https://www.youtube.com/channel/UCnZA74T8a8dEbavWRq8F2nA" rel="external"><img src="/_assets/img/svg/icn-sns-yt.svg" alt="youtube"></a></li>
+          </ul>
+        </div>
+        <!-- /SNS -->
+
+        
+  <!-- 言語 -->
+  <div class="JPX-header-menu-language">
+    <ul>
+      
+          <li><a href="/english/markets/statistics-equities/misc/index.html" title=""><span>English</span></a></li>
+        <li><a href="/corporate/index.html"><span>JPX企業情報</span></a></li>
+    </ul>
+  </div>
+  <!-- /言語 -->
+
+      </div>
+    </div>
+  </div>
+
+</header>
+
+  <div class="bread-crumb-box">
+    <div class="bread-crumb">
+      <div class="bread-crumb-data">
+        <ol>
+          
+              <li><a href="/index.html">トップページ</a></li>
+            
+              <li><a href="/markets/index.html">マーケット情報</a></li>
+            
+              <li><a href="/markets/statistics-equities/index.html">統計情報（株式関連）</a></li>
+            
+              <li><a href="/markets/statistics-equities/misc/index.html">その他統計資料</a></li>
+            
+              <li><a href="/markets/statistics-equities/misc/index.html">売買代金順位表・売買高・売買代金</a></li>
+            
+        </ol>
+      </div>
+      <div class="JPX-site-update">
+        2026/10/07 更新
+        
+      </div>
+    </div>
+  </div>
+
+    
+
+<!-- /ヘッダー出力 -->
+
+<noscript>
+<section class="JPX-section -is-attention">
+<div class="JPX-section-inner">
+<div class="JPX-noscript-wrapper">
+<div class="JPX-noscript">
+<div class="JPX-noscript-title">Javaスクリプトの設定を有効にしてください。</div>
+<div class="JPX-noscript-text">当サイトを正しく表示及び操作するにはJavaスクリプトの設定を有効にしていただく必要があります。Javaスクリプトを有効にする方法は、お使いのブラウザのヘルプを参照してください。</div>
+</div>
+</div>
+</div>
+</section>
+</noscript>
+
+    <!-- main-area -->
+    <div id="main-area" class="-is-fix">
+      <div><div class="headline-title-wrap"><h1 class="headline-title"><span>その他統計資料</span></h1></div></div>
+      <!-- main-areaIn -->
+      <div id="main-areaIn" class="-is-sidecontents">
+              <div id="readArea">
+       <section class="JPX-section">
+        
+<div>
+  <div class="tab-menu tab-menu8">
+    <ul class="heightLineParent">
+    
+      <li>
+        <a href="/markets/statistics-equities/misc/index.html" class="act-tab">売買代金順位表・売買高・売買代金
+      </a>
+      </li>
+    
+      <li>
+        <a href="/markets/statistics-equities/misc/01.html" class="">東証上場銘柄一覧
+      </a>
+      </li>
+    
+      <li>
+        <a href="/markets/statistics-equities/misc/02.html" class="">市場別時価総額
+      </a>
+      </li>
+    
+      <li>
+        <a href="/markets/statistics-equities/misc/07.html" class="">業種別時価総額
+      </a>
+      </li>
+    
+      <li>
+        <a href="/markets/statistics-equities/misc/08.html" class="">時価総額順位表
+      </a>
+      </li>
+    
+      <li>
+        <a href="/markets/statistics-equities/misc/03.html" class="">株価平均・株式平均利回り
+      </a>
+      </li>
+    
+      <li>
+        <a href="/markets/statistics-equities/misc/04.html" class="">規模別・業種別PER・PBR
+      </a>
+      </li>
+    
+      <li>
+        <a href="/markets/statistics-equities/misc/06.html" class="">上場会社資金調達額
+      </a>
+      </li>
+    
+    </ul>
+  </div>
+</div>
+  
+        
+        <div><h2 class="heading-title-mu" id="heading_0"><span>売買代金順位表（内国株式）（月間）</span></h2></div>
+        
+        
+            <div>
+              <div class="component-normal-table">
+                <table _fixedhead="rows:1; cols:0;div-auto-size: none;" class="fixedhead">
+                  <tr class="a-center">
+                    <th></th>
+                    <th>1月</th>
+                    <th>2月</th>
+                    <th>3月</th>
+                    <th>4月</th>
+                    <th>5月</th>
+                    <th>6月</th>
+                    <th>7月</th>
+                    <th>8月</th>
+                    <th>9月</th>
+                    <th>10月</th>
+                    <th>11月</th>
+                    <th>12月</th>
+                  </tr>
+                  
+                      <tr><td class="a-center w-space">2026年</td> 
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/t13vrt000000kgw5-att/202601.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/t13vrt000000oqym-att/202602.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/t13vrt000000venm-att/202603.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/t13vrt0000014exo-att/202604.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/t13vrt000001ewim-att/202605.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/t13vrt000001iwz4-att/202606.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/t13vrt000001rjm7-att/202607.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/t13vrt000001vhsf-att/202608.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/t13vrt000002742b-att/202609.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">-
+                        </td>
+                      
+                        <td class="a-center">-
+                        </td>
+                      
+                        <td class="a-center">-
+                        </td>
+                      
+                      </tr>
+                    
+                      <tr><td class="a-center w-space">2025年</td> 
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/mklp77000000ru6e-att/202501.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/um3qrc000000yp88-att/202502.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/um3qrc00000151ur-att/202503.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/um3qrc000001fwpx-att/202504.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/um3qrc000001k04f-att/202505.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/um3qrc000001o2e2-att/202506.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/um3qrc000001sbzq-att/202507.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/um3qrc0000022s3m-att/202508.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/um3qrc00000270cj-att/202509.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/t13vrt0000003msy-att/202510.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/t13vrt000000c3mh-att/202511.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/t13vrt000000gev6-att/202512.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                      </tr>
+                    
+                      <tr><td class="a-center w-space">2024年</td> 
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/skc8fn0000001oph-att/202401.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/mklp770000001lqb-att/202402.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/mklp770000003oji-att/202403.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/mklp770000006fbl-att/202404.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/mklp770000008jzs-att/202405.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/mklp77000000atw2-att/202406.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/mklp77000000dg7b-att/202407.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/mklp77000000gbj4-att/202408.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/mklp77000000iarf-att/202409.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/mklp77000000knc6-att/202410.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/mklp77000000n443-att/202411.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/mklp77000000pkgj-att/202412.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                      </tr>
+                    
+                      <tr><td class="a-center w-space">2023年</td> 
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/fi1l5r0000001jy8-att/202301.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/cg27su00000027as-att/202302.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/cg27su0000004i5g-att/202303.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/cg27su0000006eke-att/202304.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/cg27su0000008wq2-att/202305.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/aocfb40000001wi6-att/202306.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/aocfb40000003vwc-att/202307.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/jr4eth0000001law-att/202308.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/jr4eth0000003ozf-att/202309.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/bkk2ed0000001czk-att/202310.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/bkk2ed0000003no3-att/202311.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/bkk2ed0000005xrx-att/202312.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                      </tr>
+                    
+                      <tr><td class="a-center w-space">2022年</td> 
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu0000065pom-att/202201.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu0000067t0s-att/202202.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000006bbjg-att/202203.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000006e7f9-att/202204.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000006fzj4-att/202205.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000006i78c-att/202206.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000006k2zg-att/202207.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000006m103-att/202208.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000006o8tz-att/202209.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/co3pgt0000001271-att/202210.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/co3pgt0000003aze-att/202211.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/co3pgt0000005d5h-att/202212.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                      </tr>
+                    
+                      <tr><td class="a-center w-space">2021年</td> 
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000005adbm-att/202101.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000005cwtc-att/202102.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000005hrj8-att/202103.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000005ji5f-att/202104.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000005l6zl-att/202105.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000005nr70-att/202106.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000005pxpe-att/202107.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000005ryv9-att/202108.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000005vaep-att/202109.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000005zajm-att/202110.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu0000061uk3-att/202111.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu0000063wgw-att/202112.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                      </tr>
+                    
+                      <tr><td class="a-center w-space">2020年</td> 
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000004jk2e-att/202001.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000004lutp-att/202002.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000004nwcz-att/202003.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000004q3ai-att/202004.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000004rf77-att/202005.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000004trrz-att/202006.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000004vxp9-att/202007.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000004xiay-att/202008.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu0000050v7z-att/202009.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu0000053069-att/202010.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu0000055h65-att/202011.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu0000058a6p-att/202012.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                      </tr>
+                    
+                      <tr><td class="a-center w-space">2019年</td> 
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000003t7e8-att/201901.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000003v1r9-att/201902.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000003x0k9-att/201903.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000003z1rg-att/201904.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu0000042don-att/201905.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu0000044cgj-att/201906.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu00000463bt-att/201907.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu0000048gzt-att/201908.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000004bne3-att/201909.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000004dd6d-att/201910.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000004f20z-att/201911.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000004hn78-att/201912.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                      </tr>
+                    
+                      <tr><td class="a-center w-space">2018年</td> 
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000002xf11-att/201801.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000002z9ef-att/201802.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu0000031zod-att/201803.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu0000033j0x-att/201804.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu00000359qg-att/201805.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu0000037wk6-att/201806.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu0000039i0g-att/201807.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000003buov-att/201808.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000003l7c4-att/201809.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000003njne-att/201810.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000003pea7-att/201811.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000003rg25-att/201812.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                      </tr>
+                    
+                      <tr><td class="a-center w-space">2017年</td> 
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu0000028x99-att/201701.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000002ax6w-att/201702.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000002ehtv-att/201703.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000002gc33-att/201704.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000002hv3p-att/201705.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000002jmdl-att/201706.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000002l8f5-att/201707.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000002nvi0-att/201708.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000002pok8-att/201709.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000002rjqw-att/201710.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000002td9z-att/201711.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000002vpz1-att/201712.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                      </tr>
+                    
+                      <tr><td class="a-center w-space">2016年</td> 
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000001fleu-att/201601.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000001i7df-att/201602.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000001lc0o-att/201603.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000001mvcf-att/201604.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000001oksa-att/201605.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000001rf6p-att/201606.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000001t886-att/201607.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000001wviq-att/201608.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu000001z5ha-att/201609.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu0000020s3y-att/201610.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu0000022np7-att/201611.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                        <td class="a-center">
+                              <a href="/markets/statistics-equities/misc/nlsgeu0000027b4o-att/201612.pdf" rel="external"><img src="/common/images/icon/icon-pdf.png" alt="PDF" title="PDF" width="18" height="18" /></a>
+                            
+                        </td>
+                      
+                      </tr>
+                    
+                </table>
+              </div>
+            </div>
+          
+<div>
+  
+    <div class="component-annotation">
+      <ul>
+        
+              <li>毎月第5営業日の午後1時以降に資料を掲載します。</li>
+            
+      </ul>
+    </div>
+  
+</div>
+
+    <div>
+<div class="component-margin12">&nbsp;</div>
+</div>
+
+
+    <div><h2 class="heading-title" id="heading_2"><span>売買高・売買代金（月間・年間）</span></h2></div>
+          <div><p class="component-text">1985年1月以降の「月間売買高・売買代金」、1949年以降の「年間売買高・売買代金」を掲載しています。</p></div>
+    
+    <div>
+      
+<div class="component-file">
+  <table width="50%">
+    
+          <tr>
+            <th width="90%">株式・債券（2026年9月）</th>
+            
+                  <td width="10%"><a href="/markets/statistics-equities/misc/tvdivq0000000vzk-att/historical-genbutsu.xlsx" rel="external"><img src="/common/images/icon/icon-xls.png" alt="Excel" title="Excel" width="18" height="18" /></a></td>
+                
+          </tr>
+        
+          <tr>
+            <th width="90%">ETF・ETN・投資証券（2026年9月）</th>
+            
+                  <td width="10%"><a href="/markets/statistics-equities/misc/tvdivq0000000vzk-att/historical-toushin.xlsx" rel="external"><img src="/common/images/icon/icon-xls.png" alt="Excel" title="Excel" width="18" height="18" /></a></td>
+                
+          </tr>
+        
+  </table>
+</div>
+
+      
+    </div>
+  
+    
+<div>
+  
+    <div class="component-annotation">
+      <ul>
+        
+              <li>毎月第5営業日の午後1時以降に前月データを掲載します。</li>
+            
+              <li>2012年7月から2013年6月までは、マザーズにはTOKYO PRO Market上場銘柄を含みます。</li>
+            
+      </ul>
+    </div>
+  
+</div>
+
+    <div>
+<div class="component-margin24">&nbsp;</div>
+</div>
+
+
+    <div>
+  <div class="component-inquiry">
+    <p class="inquiry-title"><span>お問合せ：</span></p>
+    
+      <p class="inquiry-text">
+      株式会社東京証券取引所　株式部データサービス室<br />
+      電話：050-3377-7774<br />E-mail：<a href="mailto:databank-geppou@jpx.co.jp">databank-geppou@jpx.co.jp</a><br />
+    </p>
+    
+  </div>
+</div>
+
+    
+       </section>
+      </div><!-- /readArea -->
+        
+<!-- サイドメニュー出力 -->
+
+      <div class="JPX-sidecontents">
+        <div class="JPX-sidecontents-box">
+          <div class="JPX-sidecontents-title"><a href="/markets/index.html">マーケット情報</a></div>
+          
+            <ul class="JPX-sidemenu-list">
+              
+      <li><a href="/markets/statistics-equities/index.html" class="-is-active-parent">統計情報（株式関連）</a>
+        
+          <ul class="JPX-sidemenu-list-sub">
+            
+      <li><a href="/markets/statistics-equities/daily/index.html" class="">東京証券取引所日報</a>
+        
+      </li>
+    
+      <li><a href="/markets/statistics-equities/monthly/index.html" class="">統計月報</a>
+        
+      </li>
+    
+      <li><a href="/markets/statistics-equities/price/index.html" class="">月間相場表</a>
+        
+      </li>
+    
+      <li><a href="/markets/statistics-equities/margin/index.html" class="">信用取引残高等</a>
+        
+      </li>
+    
+      <li><a href="/markets/statistics-equities/short-selling/index.html" class="">空売り集計</a>
+        
+      </li>
+    
+      <li><a href="/markets/statistics-equities/investor-type/index.html" class="">投資部門別売買状況</a>
+        
+      </li>
+    
+      <li><a href="/markets/statistics-equities/program/index.html" class="">プログラム売買・裁定取引</a>
+        
+      </li>
+    
+      <li><a href="/markets/statistics-equities/misc/index.html" class="-is-active">その他統計資料</a>
+        
+      </li>
+    
+      <li><a href="/markets/statistics-equities/examination/index.html" class="">調査レポート</a>
+        
+      </li>
+    
+  
+          </ul>
+        
+      </li>
+    
+            </ul>
+          
+        </div>
+      </div>
+    
+
+<!-- /サイドメニュー出力 -->
+      </div>
+      <!-- /main-areaIn -->
+
+      <!-- フッター出力 -->
+<!-- ページトップ -->
+<div class="JPX-PageTop"><a href="#"><span>PageTop</span></a></div>
+<!-- /ページトップ -->
+<footer class="JPX-footer">
+  <div class="JPX-footer-wrapper">
+    <!-- ↓ PCのみ表示 ↓ -->
+    <div class="JPX-footer-sitemap-background">
+      <div class="JPX-footer-sitemap">
+        
+          <script>
+            $(function(){
+              $.ajax({
+                url:"/tvdivq000000zpw5.xml",
+                type:"GET",
+                dataType:"xml",
+                async:false,
+                timeout:1000,
+                error:function() {
+                  $("#therd_map").html('情報を取得できませんでした。');
+                },
+                success:function(xml){
+                  let html = '';
+                  $(xml).children("menu_list").children("menu").each(function() {
+                    html += '<div class="JPX-footer-sitemap-data">';
+                    
+                    html += '<div class="JPX-footer-sitemap-title"><a href="'
+                        +$(this).find('second_url').text()
+                        +'">'
+                        +$(this).find('second_name').text()
+                        +'</a></div>';
+                    
+                    html += '<ul class="JPX-footer-sitemap-list">';
+                    $(this).children("menu_list").children("menu").each(function() {
+                      html += '<li><a href="'
+                        +$(this).find('third_url').text()
+                        +'">'
+                        +$(this).find('third_name').text()
+                        +'</a></li>';
+                    });
+                    html += '</ul>';
+                    html += '</div>';
+                  });
+
+                  $("#therd_map").append(html);
+                }
+              });
+            });
+          </script>
+          <div class="JPX-footer-sitemap-box" id="therd_map">
+          </div>
+        
+<div class="JPX-footer-purpose-box">
+  
+    <div class="JPX-footer-purpose -individual"><a href="/individuals/index.html"><span>個人の方</span></a></div>
+  
+    <div class="JPX-footer-purpose -company"><a href="/listed-companies/index.html"><span>上場会社の方</span></a></div>
+  
+    <div class="JPX-footer-purpose -consider"><a href="/pre-listed-companies/index.html"><span>上場検討中の方</span></a></div>
+  
+    <div class="JPX-footer-purpose -participant"><a href="/participants/index.html"><span>取引参加者の方</span></a></div>
+  
+    <div class="JPX-footer-purpose -investor"><a href="/institutional/index.html"><span>機関投資家の方</span></a></div>
+  
+    <div class="JPX-footer-purpose -media"><a href="/media/index.html"><span>報道機関の方</span></a></div>
+  
+</div>
+<!-- /対象者別 -->
+        
+      </div>
+      <!-- ↑ PCのみ表示 ↑ -->
+      
+      <div class="JPX-footer-sub">
+        <ul class="JPX-footer-sublink">
+
+  <li><a href="/calendar/index.html" ><span>JPXカレンダー</span></a></li>
+
+  <li><a href="/corporate/about-jpx/access/index.html" ><span>アクセス</span></a></li>
+
+  <li><a href="/glossary/index.html" ><span>用語集</span></a></li>
+
+  <li><a href="/corporate/learning/tour/index.html" ><span>見学</span></a></li>
+
+  <li><a href="/corporate/about-jpx/recruit/index.html" ><span>採用情報</span></a></li>
+
+  <li><a href="/corporate/investor-relations/shareholders/announcement/index.html" ><span>法定公告</span></a></li>
+
+</ul>
+        <ul class="JPX-footer-sns-icon">
+          <li><a href="https://x.com/JPX_official" rel="external"><img src="/_assets/img/svg/icn-sns-tw.svg" alt="X"></a></li>
+          <li><a href="https://www.facebook.com/JapanExchangeGroup" rel="external"><img src="/_assets/img/svg/icn-sns-fb.svg" alt="facebook"></a></li>
+          <li><a href="https://www.instagram.com/jpx_official/" rel="external"><img src="/_assets/img/svg/icn-sns-ig.svg" alt="instagram"></a></li>
+          <li><a href="https://www.youtube.com/channel/UCnZA74T8a8dEbavWRq8F2nA" rel="external"><img src="/_assets/img/svg/icn-sns-yt.svg" alt="youtube"></a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="JPX-footer-main">
+
+      <div class="JPX-footer-link-box">
+  <ul class="JPX-footer-link">
+
+  <li><a href="/faq/index.html" ><span>よくあるご質問</span></a></li>
+
+  <li><a href="/sitemap/index.html" ><span>サイトマップ</span></a></li>
+
+  <li><a href="/term-of-use/index.html" ><span>サイトのご利用上の注意と免責事項</span></a></li>
+
+  <li><a href="/corporate/governance/security/personal-information/index.html" ><span>個人情報の取扱い</span></a></li>
+
+  </ul>
+</div>
+
+      <div class="JPX-footer-logo">
+        <div class="JPX-footer-logo-img">
+          <a href="/">
+            <img src="/_assets/img/image/logo_full.png" alt="JPXロゴ">
+          </a>
+        </div>
+        <div class="JPX-footer-copylight">&copy; Japan Exchange Group, Inc.</div>
+      </div>
+    </div>
+  </div>
+</footer>
+<!-- /フッター出力 -->
+
+    </div>
+    <!-- /main-area -->
+  </div>
+  <!-- /wrapper-area -->
+
+  <!-- Bodyタグ末尾の共通処理 -->
+  <!-- Facebook Pixel Code -->
+  <script>
+    !function(f,b,e,v,n,t,s)
+    {if(f.fbq)return;n=f.fbq=function(){n.callMethod?
+    n.callMethod.apply(n,arguments):n.queue.push(arguments)};
+    if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
+    n.queue=[];t=b.createElement(e);t.async=!0;
+    t.src=v;s=b.getElementsByTagName(e)[0];
+    s.parentNode.insertBefore(t,s)}(window, document,'script',
+    'https://connect.facebook.net/en_US/fbevents.js');
+    fbq('init', '191019531472708');
+    fbq('track', 'PageView');
+  </script>
+  <noscript>
+  <img height="1" width="1" style="display:none" src="https://www.facebook.com/tr?id=191019531472708&amp;ev=PageView&amp;noscript=1" />
+  </noscript>
+
+  <script type="text/javascript" src="/_assets/js/slick.min.js"></script>
+  <script type="text/javascript" src="/_assets/js/jquery.matchHeight.js"></script>
+  <script type="text/javascript" src="/_assets/js/script.js"></script>
+  <script type="text/javascript" src="/_assets/js/common.js"></script>
+  <script type="text/javascript" src="/_assets/js/heightLine.js"></script>
+<!--  <script type="text/javascript" src="/_assets/js/fixed_midashi.js"></script> -->
+  <script type="text/javascript" src="/_assets/js/fix-table-header.js"></script>
+  
+  <script type="text/javascript" src="/_assets/js2/lity.js"></script>
+  <script type="text/javascript" src="/_assets/js/link.js"></script>
+  <script type="text/javascript" src="/_assets/js/jquery.prettyPhoto.js"></script>
+  <script type="text/javascript" src="/_assets/js2/jquery.mousewheel.js"></script>
+  <script type="text/javascript" src="/_assets/js2/jquery.jscrollpane.min.js"></script>
+  <script type="text/javascript" src="/_assets/js2/jquery.easing.1.3.js"></script>
+  <script type="text/javascript" src="/_assets/js2/jquery.aslider.min.js"></script>
+  <script type="text/javascript" src="/_assets/js2/jquery.bxslider.min.js"></script>
+  <script type="text/javascript" src="/_assets/js2/iframe.js"></script>
+  <script type="text/javascript" src="/_assets/js2/add-action.js"></script>
+  <script type="text/javascript" src="/_assets/js2/add_attribute_gid.js"></script>
+  <script src="/_assets/js2/popterm3.js" type="text/javascript"></script>
+  
+  <script><!--
+  var p1 = new popTerm({'id': 'popterm2',  'targetid': 'q2', 'url': '//jpx2.sitesearch.jp/popterm-jp/popterm.pl' ,'css': '/_assets/css2/popterm3.css', 'trid':'0'});
+  --></script>
+  <!-- End Facebook Pixel Code -->
+  <!-- /Bodyタグ末尾の共通処理 -->
+
+</body>
+</html>

@@ -1,0 +1,34 @@
+
+### https://www.jpx.co.jp/markets/derivatives/index.html [200] 先物・オプション関連 | 日本取引所グループ
+files (0):
+
+### https://www.jpx.co.jp/markets/derivatives/trading-volume/index.html [200] 当日取引高等 | 日本取引所グループ
+files (1):
+  https://www.jpx.co.jp/markets/derivatives/trading-volume/t13vrt0000026aes-att/20261016open_interest.xlsx
+
+### https://www.jpx.co.jp/markets/derivatives/participant-volume/index.html [200] 日次 | 取引参加者別取引高（手口上位一覧） | 先物・オプション | 日本取引所グループ
+files (0):
+
+### https://www.jpx.co.jp/markets/derivatives/open-interest/index.html [200] 取引参加者別建玉残高一覧 | 先物・オプション | 日本取引所グループ
+files (0):
+
+### https://www.jpx.co.jp/markets/statistics-derivatives/index.html [200] 統計情報（先物・オプション関連） | 日本取引所グループ
+files (0):
+
+### https://www.jpx.co.jp/markets/paid-info-derivatives/index.html [200] 有料情報（先物・オプション関連） | 日本取引所グループ
+files (0):
+
+### https://www.jpx.co.jp/markets/derivatives/participant-volume/01.html [200] 月次 | 取引参加者別取引高（手口上位一覧） | 先物・オプション | 日本取引所グループ
+files (0):
+
+### https://www.jpx.co.jp/markets/statistics-derivatives/daily/index.html [200] 大阪取引所／東京商品取引所日報 | 日本取引所グループ
+files (0):
+
+### https://www.jpx.co.jp/markets/statistics-derivatives/trading-volume/index.html [200] 取引総括表 | 統計情報（先物・オプション関連） | 日本取引所グループ
+files (6):
+  https://www.jpx.co.jp/automation/markets/statistics-derivatives/trading-volume/files/soukatsu_M.xlsx
+  https://www.jpx.co.jp/automation/markets/statistics-derivatives/trading-volume/files/soukatsu_Year.xlsx
+  https://www.jpx.co.jp/automation/markets/statistics-derivatives/trading-volume/files/soukatsu_half_Year.xlsx
+  https://www.jpx.co.jp/automation/markets/statistics-derivatives/trading-volume/files/soukatsu_FY.xlsx
+  https://www.jpx.co.jp/automation/markets/statistics-derivatives/trading-volume/files/soukatsu_half_FY.xlsx
+  https://www.jpx.co.jp/markets/statistics-derivatives/trading-volume/nlsgeu000004j469-att/tv_ts202609.xls

@@ -1,0 +1,56 @@
+## [0] https://production.dataviz.cnn.io/index/fearandgreed/graphdata
+status 200 type application/json bytes 177833
+{"fear_and_greed": {"score": 17.9383219954649, "rating": "extreme fear", "timestamp": "2026-10-16T23:59:49+00:00", "previous_close": 31.5428571428571, "previous_1_week": 46.4857142857143, "previous_1_month": 27.3142857142857, "previous_1_year": 23.114285714285717}, "fear_and_greed_historical": {"timestamp": 1792195189000.0, "score": 17.9383219954649, "rating": "extreme fear", "data": [{"x": 1760659200000.0, "y": 22.32857142857143, "rating": "extreme fear"}, {"x": 1760918400000.0, "y": 29.85714285714286, "rating": "fear"}, {"x": 1761004800000.0, "y": 28.542857142857148, "rating": "fear"}, {"x":
+
+## [1] https://indexes.nikkei.co.jp/nkave/historical/nikkei_stock_average_daily_jp.csv
+status 200 type text/csv bytes 53820
+�f�[�^���t,�I�l,�n�l,���l,���l
+"2023/01/04","25716.86","25834.93","25840.68","25661.89"
+"2023/01/05","25820.80","25825.50","25947.10","25750.46"
+"2023/01/06","25973.85","25740.08","26034.06","25719.61"
+"2023/01/10","26175.56","26176.61","26316.66","26132.80"
+"2023/01/11","26446.00","26362.21","26479.99","26332.05"
+"2023/01/12","26449.82","26524.94","26547.61","26381.93"
+"2023/01/13","26119.52","26391.78","26409.21","26090.84"
+"2023/01/16","25822.32","25836.67","25938.04","25748.10"
+"2023/01/17","26138.68","25915.51","26198.69","25895.30"
+"2023/01/18","26791.12","26251.34","26816.68",
+
+## [2] https://indexes.nikkei.co.jp/nkave/historical/nikkei_stock_average_vi_daily_jp.csv
+status 200 type text/csv bytes 42720
+�f�[�^���t,�I�l,�n�l,���l,���l
+"2023/01/04","20.19","20.16","20.48","20.01"
+"2023/01/05","18.93","19.30","19.39","18.78"
+"2023/01/06","18.21","18.47","18.49","17.92"
+"2023/01/10","18.28","18.37","18.64","18.13"
+"2023/01/11","17.95","17.83","18.02","17.33"
+"2023/01/12","18.80","18.21","18.92","18.00"
+"2023/01/13","18.58","18.08","18.80","17.41"
+"2023/01/16","19.77","19.31","19.95","19.14"
+"2023/01/17","19.15","19.61","19.69","18.88"
+"2023/01/18","17.54","19.91","21.42","17.39"
+"2023/01/19","17.91","17.73","18.18","17.50"
+"2023/01/20","17.37","18.05","18.08","17.35"
+"2023/01/23","17
+
+## [3] https://stooq.com/q/d/l/?s=^nkx&i=d
+status 403 type text/html bytes 226
+<meta charset=utf-8><title>Stooq</title><center style=font-family:arial;margin-top:50px><p><a href=/><img src=//static.stooq.com/stooq.svg height=68></a><p style=font-size:x-large>Access denied<p><small><a href=/>Main Page</a>
+
+## [4] https://query1.finance.yahoo.com/v8/finance/chart/%5EN225?range=2y&interval=1d
+status 200 type application/json;charset=utf-8 bytes 44944
+{"chart":{"result":[{"meta":{"currency":"JPY","symbol":"^N225","exchangeName":"OSA","fullExchangeName":"Osaka","instrumentType":"INDEX","firstTradeDate":-157420800,"regularMarketTime":1792133103,"hasPrePostMarketData":false,"gmtoffset":32400,"timezone":"JST","exchangeTimezoneName":"Asia/Tokyo","regularMarketPrice":65324.29,"regularMarketChangePercent":1.394,"fulldayPrice":65324.29,"fulldayChange":898.34,"fulldayChangePercent":1.394,"fiftyTwoWeekHigh":72831.73,"fiftyTwoWeekLow":48235.3,"regularMarketDayHigh":65712.3,"regularMarketDayLow":64800.9,"regularMarketVolume":0,"longName":"Nikkei 225","
+
+## [5] https://www.jpx.co.jp/markets/statistics-equities/misc/index.html
+status 200 type text/html bytes 76542
+<!DOCTYPE html>
+<html lang="ja">
+<head prefix="og: http://ogp.me/ns# fb: http://ogp.me/ns/fb# article: http://ogp.me/ns/article#">
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta name="copyright" content="(C) Japan Exchange Group, Inc.">
+
+<meta name="description" content="その他統計資料のページ。東京証券取引所、大阪取引所、東京商品取引所等を運営する日本取引所グループ（JPX）のサイトです。">
+  
+<meta property="og:title" content="その他統計資料 | 日本取引所グルー�

@@ -41,14 +41,14 @@ export function reversalThreshold(bars: Bar[], k: number): number {
   return Math.max(0.03 * bars[k].close, 2.5 * (n ? s / n : 0));
 }
 
-/** ジグザグで高値・安値の転換点を抽出。反転幅は max(3%, 2.5×ATR14) */
-export function pivots(bars: Bar[], end = bars.length - 1): Pivot[] {
+/** ジグザグで高値・安値の転換点を抽出。反転幅は max(3%, 2.5×ATR14) × scale(大きな波を見るときは scale > 1) */
+export function pivots(bars: Bar[], end = bars.length - 1, scale = 1): Pivot[] {
   const out: Pivot[] = [];
   if (end < 20) return out;
   let dir: 1 | -1 = bars[1].close >= bars[0].close ? 1 : -1;
   let ext = dir === 1 ? { i: 0, p: bars[0].high } : { i: 0, p: bars[0].low };
   for (let i = 1; i <= end; i++) {
-    const th = reversalThreshold(bars, i);
+    const th = reversalThreshold(bars, i) * scale;
     if (dir === 1) {
       if (bars[i].high >= ext.p) ext = { i, p: bars[i].high };
       else if (ext.p - bars[i].low >= th) {
@@ -122,6 +122,73 @@ export function targets(pv: Pivot[], bars?: Bar[], end?: number): Targets | null
   };
 }
 
+/** 計算値の A→B→C を単純に当てはめる(選択ロジックなし) */
+export function targetsOf(A: Pivot, B: Pivot, C: Pivot): Targets {
+  const direction = C.type === "low" ? "up" : "down";
+  const sg = direction === "up" ? 1 : -1;
+  const ab = Math.abs(B.price - A.price);
+  return {
+    direction, a: A, b: B, c: C, cTentative: !C.confirmed, retrace: ab ? Math.abs(B.price - C.price) / ab : 0,
+    N: C.price + sg * ab, V: B.price + sg * Math.abs(B.price - C.price), E: B.price + sg * ab, NT: C.price + sg * Math.abs(C.price - A.price),
+  };
+}
+
+/**
+ * 3波動の読み方の候補。
+ * 進行中の波の起点(直近の確定転換点)と、進行中の極値(反転幅以上動いていれば)を C として、
+ * 「A→B が第1波、B→C が押し・戻し、C→D が第3波」になる A・B の組み合わせを転換点の中から列挙する。
+ * 条件: A→B の間に A を超える値も B を割る値もない(きれいな 1 波)、B→C の間に B を割る値も C を超える値もない、
+ * C は A を超えない(押し・戻しの範囲内)。小さな波(例: 8月高値→9月安値)を戻しの一部とみなす大きな読みも同時に出る。
+ */
+export interface Scenario {
+  t: Targets;
+  /** 進行中の波がこの読みの第3波(C→D)に当たる: C が確定していて、現在の極値が C から目標の向きに動いている */
+  inProgress: boolean;
+  progress: number | null; // 第3波の進捗: 現在の極値が C→N のどこまで来たか(1 = N 到達)
+  extreme: number | null; // 進行中の波の極値
+  waveSize: number; // 第1波 |B − A|
+}
+
+export function waveScenarios(bars: Bar[], end: number, pv = pivots(bars, end)): Scenario[] {
+  const conf = pv.filter((p) => p.confirmed);
+  const tent = pv[pv.length - 1];
+  if (conf.length < 2 || !tent) return [];
+  const last = conf[conf.length - 1];
+  const tentOk = !tent.confirmed && tent.i > last.i && Math.abs(tent.price - last.price) >= reversalThreshold(bars, end);
+  const maxH = (i0: number, i1: number) => { let m = -Infinity; for (let i = i0; i <= i1; i++) m = Math.max(m, bars[i].high); return m; };
+  const minL = (i0: number, i1: number) => { let m = Infinity; for (let i = i0; i <= i1; i++) m = Math.min(m, bars[i].low); return m; };
+  const LOOKBACK = 260;
+  const out: Scenario[] = [];
+  const seen = new Set<string>();
+  const cands: { C: Pivot; inProgress: boolean }[] = [];
+  if (tentOk) cands.push({ C: tent, inProgress: false }); // 進行中の極値を押し目・戻り高値とみなす → 次の波の目標
+  if (tentOk || tent.i === last.i) cands.push({ C: last, inProgress: tentOk }); // 進行中の波を第3波とみなす
+  for (const { C, inProgress } of cands) {
+    const up = C.type === "low";
+    for (const B of conf.filter((p) => p.type !== C.type && p.i < C.i && C.i - p.i <= LOOKBACK)) {
+      // B→C: B を割らず(超えず)、C が B 以降の最高値(最安値)
+      if (up ? maxH(B.i, C.i) !== B.price || minL(B.i, C.i) !== C.price : minL(B.i, C.i) !== B.price || maxH(B.i, C.i) !== C.price) continue;
+      for (const A of conf.filter((p) => p.type === C.type && p.i < B.i && C.i - p.i <= LOOKBACK)) {
+        // A→B: A が区間の最安値(最高値)、B が区間の最高値(最安値)
+        if (up ? minL(A.i, B.i) !== A.price || maxH(A.i, B.i) !== B.price : maxH(A.i, B.i) !== A.price || minL(A.i, B.i) !== B.price) continue;
+        const t = targetsOf(A, B, C);
+        if (t.retrace >= 1) continue; // C が A を超えている = 押し・戻しではない
+        const key = `${A.date}|${B.date}|${C.date}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        let progress: number | null = null, extreme: number | null = null;
+        if (inProgress) {
+          extreme = tent.price;
+          progress = (up ? tent.price - C.price : C.price - tent.price) / Math.abs(t.N - C.price);
+        }
+        out.push({ t, inProgress, progress, extreme, waveSize: Math.abs(B.price - A.price) });
+      }
+    }
+  }
+  // 進行中の第3波 → 次の波。同じ区分では大きな波から
+  return out.sort((a, b) => Number(b.inProgress) - Number(a.inProgress) || b.waveSize - a.waveSize).slice(0, 8);
+}
+
 /** 基準日(転換点)からの日数が基本数値に当たる日。日数は基準日を 1 日目として営業日(本数)で数える */
 export interface TimeSignal {
   from: string; fromType: "high" | "low"; fromPrice: number; // 基準日(起算日)
@@ -179,6 +246,7 @@ export interface Ichimoku {
   wave: Wave;
   pivots: Pivot[];
   targets: Targets | null;
+  scenarios?: Scenario[]; // 3波動の読み方の候補(複数)
   time: ReturnType<typeof timeSignals>;
   levels: { price: number; label: string }[]; // 相場水準(価格順)
   support: { price: number; label: string } | null;
@@ -231,7 +299,7 @@ export function ichimoku(bars: Bar[]): Ichimoku | null {
     chikouRef: { high: ref.high, low: ref.low, close: ref.close },
     signal, score, judgment: judgmentOf(score),
     sanyaku: signal.tk > 0 && signal.cloud > 0 && signal.chikou > 0 ? "三役好転" : signal.tk < 0 && signal.cloud < 0 && signal.chikou < 0 ? "三役逆転" : null,
-    wave: classifyWave(pv), pivots: pv.slice(-6), targets: t, time: timeSignals(pv, i, bars),
+    wave: classifyWave(pv), pivots: pv.slice(-6), targets: t, scenarios: waveScenarios(bars, i, pv), time: timeSignals(pv, i, bars),
     levels, support: below[below.length - 1] ?? null, resistance: above[0] ?? null,
   };
 }

@@ -15,7 +15,7 @@ const SIGNAL_LABEL: Record<(typeof SIGNAL_KEYS)[number], [string, string, string
 type IchiView = NonNullable<DailyAnalysis["ichimoku"]>;
 
 function chart(ic: IchiView): string {
-  const bars = ic.chart.slice(-90), fut = ic.futureCloud;
+  const bars = ic.chart.slice(-110), fut = ic.futureCloud;
   const all = [...bars.flatMap((b) => [b.high, b.low, b.spanA ?? b.close, b.spanB ?? b.close]), ...fut.flatMap((f) => [f.spanA, f.spanB])];
   const max = Math.max(...all), min = Math.min(...all);
   const n = bars.length + fut.length;
@@ -44,30 +44,37 @@ function chart(ic: IchiView): string {
     return `<line x1="${x(i)}" x2="${x(i)}" y1="${y(b.high)}" y2="${y(b.low)}" class="${up ? "ic-up" : "ic-dn"}"/>` +
       `<rect x="${x(i) - cw / 2}" y="${y(Math.max(b.open, b.close))}" width="${cw}" height="${Math.max(1, Math.abs(y(b.open) - y(b.close)))}" class="${up ? "ic-up-b" : "ic-dn-b"}"><title>${b.date} 始${yen(b.open)} 高${yen(b.high)} 安${yen(b.low)} 終${yen(b.close)}</title></rect>`;
   }).join("");
-  const t = ic.result.targets;
+  const t = scenarioTargets(ic);
   const tline = (v: number, label: string) => v >= min && v <= max ? `<line x1="${x(bars.length - 1)}" x2="${W - 10}" y1="${y(v)}" y2="${y(v)}" class="ic-target"/><text x="${W - 12}" y="${y(v) - 3}" text-anchor="end" class="ic-target-t">${label} ${yen(v)}</text>` : "";
-  // 波動論(3波動): 転換点を結ぶジグザグ。A→B→C(計算値の基準)は太線でラベル付き、未確定の直近極値は破線
+  // 波動論(3波動): 転換点を結ぶジグザグ(細線)+ 読み方の候補ごとの A→B→C(第1候補は太線・ラベル付き、他は破線)
   const idx = new Map(bars.map((b, i) => [b.date, i]));
   const pvIn = ic.result.pivots.map((p) => ({ ...p, k: idx.get(p.date) })).filter((p): p is typeof p & { k: number } => p.k != null);
-  const abc = t ? new Map([[t.a.date, "A"], [t.b.date, "B"], [t.c.date, "C"]]) : new Map<string, string>();
   let wave = "";
   for (let k = 1; k < pvIn.length; k++) {
     const p = pvIn[k - 1], q = pvIn[k];
-    const strong = abc.has(p.date) && abc.has(q.date);
-    wave += `<line x1="${x(p.k).toFixed(1)}" y1="${y(p.price).toFixed(1)}" x2="${x(q.k).toFixed(1)}" y2="${y(q.price).toFixed(1)}" class="${!q.confirmed ? "ic-wave-tmp" : strong ? "ic-wave-abc" : "ic-wave"}"/>`;
+    wave += `<line x1="${x(p.k).toFixed(1)}" y1="${y(p.price).toFixed(1)}" x2="${x(q.k).toFixed(1)}" y2="${y(q.price).toFixed(1)}" class="${!q.confirmed ? "ic-wave-tmp" : "ic-wave"}"/>`;
   }
-  wave += pvIn.map((p) => {
-    const lab = abc.get(p.date), dy = p.type === "high" ? -7 : 14;
-    return `<circle cx="${x(p.k).toFixed(1)}" cy="${y(p.price).toFixed(1)}" r="${lab ? 3.5 : 2.5}" class="${lab ? "ic-pv-abc" : "ic-pv"}"><title>${p.date} ${p.type === "high" ? "高値" : "安値"} ${yen(p.price)}${p.confirmed ? "" : "(未確定)"}</title></circle>` +
-      (lab ? `<text x="${x(p.k).toFixed(1)}" y="${(y(p.price) + dy).toFixed(1)}" text-anchor="middle" class="ic-pv-t">${lab}</text>` : "");
-  }).join("");
+  wave += pvIn.map((p) => `<circle cx="${x(p.k).toFixed(1)}" cy="${y(p.price).toFixed(1)}" r="2.5" class="ic-pv"><title>${p.date} ${p.type === "high" ? "高値" : "安値"} ${yen(p.price)}${p.confirmed ? "" : "(未確定)"}</title></circle>`).join("");
+  const scen = (ic.result.scenarios ?? []).slice(0, 4);
+  scen.forEach((sc, n) => {
+    const pts = [sc.t.a, sc.t.b, sc.t.c].map((p) => ({ ...p, k: idx.get(p.date) }));
+    if (pts.some((p) => p.k == null)) return;
+    const d = pts.map((p) => `${x(p.k!).toFixed(1)},${y(p.price).toFixed(1)}`).join("L");
+    const title = `${sc.t.direction === "up" ? "上昇" : "下落"}3波動の読み${n + 1}: A ${pts[0].date} → B ${pts[1].date} → C ${pts[2].date} / N計算値 ${yen(sc.t.N)}`;
+    wave += `<path d="M${d}" class="${n === 0 ? "ic-sc-main" : "ic-sc"}"><title>${title}</title></path>`;
+    if (n === 0) wave += pts.map((p, j) => `<circle cx="${x(p.k!).toFixed(1)}" cy="${y(p.price).toFixed(1)}" r="3.5" class="ic-pv-abc"/><text x="${x(p.k!).toFixed(1)}" y="${(y(p.price) + (p.type === "high" ? -7 : 14)).toFixed(1)}" text-anchor="middle" class="ic-pv-t">${"ABC"[j]}</text>`).join("");
+    else { // ラベルは A→B の中点に(B は他の読みの C と重なりやすい)
+      const mx = (x(pts[0].k!) + x(pts[1].k!)) / 2, my = (y(pts[0].price) + y(pts[1].price)) / 2;
+      wave += `<text x="${(mx + 6).toFixed(1)}" y="${(my - 4).toFixed(1)}" class="ic-sc-t">読み${n + 1}</text>`;
+    }
+  });
   // 時間論: 変化日の候補を縦線で表示(当日の該当と 10 営業日以内の次候補、同じ日はまとめる)。基準日は tooltip に
   const tm = ic.result.time;
   const md = (d: string) => d.slice(5).replace("-", "/");
   const basis = (u: { from: string; fromType: "high" | "low"; number: number }) => `${md(u.from)}${u.fromType === "high" ? "高値" : "安値"}から${u.number}日目`;
-  let vn = 0; // ラベルが重ならないよう 2 段に振り分け
+  let vn = 0; // ラベルが重ならないよう 3 段に振り分け
   const vline = (k: number, label: string, cls: string, title: string) =>
-    `<line x1="${x(k).toFixed(1)}" x2="${x(k).toFixed(1)}" y1="22" y2="${H - 22}" class="${cls}"><title>${title}</title></line><text x="${x(k).toFixed(1)}" y="${vn++ % 2 ? 20 : 9}" text-anchor="middle" class="ic-time-t">${label}</text>`;
+    `<line x1="${x(k).toFixed(1)}" x2="${x(k).toFixed(1)}" y1="32" y2="${H - 22}" class="${cls}"><title>${title}</title></line><text x="${x(k).toFixed(1)}" y="${[9, 19, 29][vn++ % 3]}" text-anchor="middle" class="ic-time-t">${label}</text>`;
   const byDay = new Map<number, typeof tm.upcoming>();
   for (const u of tm.upcoming) byDay.set(u.inBars, [...(byDay.get(u.inBars) ?? []), u]);
   const changeDays = (tm.hits.length ? vline(bars.length - 1, "変化日", "ic-time-hit", `本日: ${tm.hits.map(basis).join(" / ")}`) : "") +
@@ -76,12 +83,33 @@ function chart(ic: IchiView): string {
   const xt = bars.filter((_, i) => i % 20 === 0).map((b) => `<text x="${x(bars.indexOf(b))}" y="${H - 8}" text-anchor="middle">${b.date.slice(5).replace("-", "/")}</text>`).join("");
   return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="一目均衡表 日足">${yt}${xt}${cloud}${candles}${line("tenkan", "ic-tenkan")}${line("kijun", "ic-kijun")}
     ${chikou.length > 1 ? `<path d="M${chikou.join("L")}" class="ic-chikou"/>` : ""}
-    ${t ? tline(t.N, "N") + tline(t.E, "E") + tline(t.V, "V") : ""}${changeDays}${wave}
-    <text x="${W - 12}" y="${H - 8}" text-anchor="end"><tspan class="ic-tenkan-t">━ 転換線</tspan> <tspan class="ic-kijun-t">━ 基準線</tspan> <tspan class="ic-chikou-t">━ 遅行スパン</tspan> <tspan class="ic-wave-t">━ 波動(A→B→C)</tspan> <tspan class="ic-time-t">┆ 変化日</tspan></text></svg>`;
+    ${t ? tline(t.N, "N") + tline(t.NT, "NT") + tline(t.V, "V") : ""}${changeDays}${wave}
+    <text x="${W - 12}" y="${H - 8}" text-anchor="end"><tspan class="ic-tenkan-t">━ 転換線</tspan> <tspan class="ic-kijun-t">━ 基準線</tspan> <tspan class="ic-chikou-t">━ 遅行スパン</tspan> <tspan class="ic-wave-t">━ 3波動の読み(A→B→C)</tspan> <tspan class="ic-time-t">┆ 変化日</tspan></text></svg>`;
 }
 
 const DOW = ["日", "月", "火", "水", "木", "金", "土"];
 const md = (d: string) => d.slice(5).replace("-", "/");
+
+/** チャートに引く計算値: 進行中の第3波の読みがあればそれ、なければ次の波の第1候補 */
+function scenarioTargets(ic: IchiView): Targets | null {
+  return ic.result.scenarios?.[0]?.t ?? ic.result.targets;
+}
+
+/** 3波動の読み方の候補を順に表示 */
+function scenariosBlock(ic: IchiView, basis: number): string {
+  const r = ic.result;
+  const list = r.scenarios ?? (r.targets ? [{ t: r.targets, inProgress: false, progress: null, extreme: null, waveSize: 0 }] : []);
+  if (!list.length) return `<h4>計算値(3波動)</h4><p class="small">転換点がそろうと表示します。</p>`;
+  const blocks = list.map((sc, n) => {
+    const t = sc.t, up = t.direction === "up";
+    const status = sc.inProgress
+      ? `<span class="${up ? "up" : "down"}">第3波が進行中</span>: 現在の極値 ${yen(sc.extreme!)} は C から N計算値までの <strong>${Math.round((sc.progress ?? 0) * 100)}%</strong> の位置${t.direction === "down" ? "(下げ余地 N まで " + yen(Math.max(0, sc.extreme! - t.N)) + "円)" : "(上げ余地 N まで " + yen(Math.max(0, t.N - sc.extreme!)) + "円)"}`
+      : t.cTentative ? `C は反転が未確定の進行中の極値。${up ? "下落" : "上昇"}が続けば C と計算値は更新されます` : "C 確定後の次の波の目標";
+    return `<div class="scenario${n === 0 ? " scenario-main" : ""}"><p class="small"><strong>読み${n + 1}: ${up ? "上昇" : "下落"}3波動</strong> — ${status}</p>${targetsBlock(t, r.close, basis)}</div>`;
+  });
+  return `<h4>計算値(3波動の読み方 ${list.length} 通り)</h4>
+    <p class="small muted">転換点の組み合わせから「A→B = 第1波、B→C = ${"押し・戻し"}、C→D = 第3波」として成り立つ読みをすべて挙げています(小さな波を戻しの一部とみなす大きな読みも含む)。どの読みが本線かは相場の進み方で決まります。</p>${blocks.join("")}`;
+}
 
 /** 計算値: 基準の A・B・C と算式を明示する */
 function targetsBlock(t: Targets, close: number, basis: number): string {
@@ -95,8 +123,7 @@ function targetsBlock(t: Targets, close: number, basis: number): string {
     ["E", t.E, `B ${sgn} (B − A) = ${yen(t.b.price)} ${sgn} ${yen(ab)}`],
     ["NT", t.NT, `C ${sgn} (C − A) = ${yen(t.c.price)} ${sgn} ${yen(ac)}`],
   ];
-  return `<h4>計算値(${up ? "上昇" : "下落"}目標)</h4>
-    <p class="small">基準: ${pt(t.a, "A")} → ${pt(t.b, "B")} → ${pt(t.c, "C")}。A→B が第1波(${yen(ab)}円)、B→C が${up ? "押し" : "戻し"}(${yen(bc)}円 = 第1波の ${Math.round(t.retrace * 100)}%)、C からの第3波の到達目標を計算。${t.cTentative ? `C は反転が未確定の進行中の極値です。${up ? "下落" : "上昇"}が続けば C と計算値は更新されます。` : ""}</p>
+  return `<p class="small">基準: ${pt(t.a, "A")} → ${pt(t.b, "B")} → ${pt(t.c, "C")}。A→B が第1波(${yen(ab)}円)、B→C が${up ? "押し" : "戻し"}(${yen(bc)}円 = 第1波の ${Math.round(t.retrace * 100)}%)、C からの第3波の到達目標を計算。${t.cTentative ? `C は反転が未確定の進行中の極値です。${up ? "下落" : "上昇"}が続けば C と計算値は更新されます。` : ""}</p>
     <div class="kpis">${rows.map(([k, v, f]) => `<div class="kpi"><span>${k}計算値</span><strong>${yen(v)}</strong><small>${f}<br>先物 ${yen(v + basis)} / 現値比 ${v >= close ? "+" : "−"}${yen(Math.abs(v - close))}</small></div>`).join("")}</div>`;
 }
 
@@ -123,7 +150,7 @@ export function renderIchimokuSection(ic: IchiView | undefined): string {
       <tr><td>五線の値</td><td colspan="2" class="wrap">転換線 ${f(r.lines.tenkan)} / 基準線 ${f(r.lines.kijun)} / 雲 ${yen(Math.min(r.lines.spanA, r.lines.spanB))}〜${yen(Math.max(r.lines.spanA, r.lines.spanB))} / 遅行スパン 26日前 高${yen(r.chikouRef.high)} 安${yen(r.chikouRef.low)}</td></tr>
     </tbody></table></div>
     <h4>波動論(3波動): ${r.wave}</h4><p class="small">転換点: ${pv}</p>
-    ${t ? targetsBlock(t, r.close, basis) : `<h4>計算値</h4><p class="small">転換点が 3 つそろうと表示します。</p>`}
+    ${scenariosBlock(ic, basis)}
     <h4>時間論(基本数値)</h4>
     <p class="small">${r.time.hits.length
       ? `<strong>本日 ${md(r.date)} は変化日の候補</strong>: ${r.time.hits.map((h) => `${md(h.from)}の${h.fromType === "high" ? "高値" : "安値"}(${yen(h.fromPrice)})を 1 日目として ${h.bars} 日目 = 基本数値 ${h.number}${h.offset ? "(前日がちょうど)" : ""}`).join("、")}`
@@ -145,6 +172,8 @@ td.wrap{white-space:normal;text-align:left;font-size:13px}
 svg tspan.ic-tenkan-t{fill:#e67e22}svg tspan.ic-kijun-t{fill:#2563eb}svg tspan.ic-chikou-t{fill:#7c3aed}
 .ic-target{stroke:#b7791f;stroke-dasharray:5 3}svg text.ic-target-t{fill:#b7791f;font-size:10px}
 .ic-wave{stroke:#0ea5e9;stroke-width:1.2;opacity:.8}.ic-wave-abc{stroke:#0ea5e9;stroke-width:2.2}.ic-wave-tmp{stroke:#0ea5e9;stroke-width:1.2;stroke-dasharray:4 3;opacity:.7}
+.ic-sc-main{fill:none;stroke:#0ea5e9;stroke-width:2.4}.ic-sc{fill:none;stroke:#f59e0b;stroke-width:1.4;stroke-dasharray:6 3;opacity:.85}svg text.ic-sc-t{fill:#f59e0b;font-size:10px}
+.scenario{border-left:3px solid #f59e0b55;padding-left:10px;margin:8px 0}.scenario-main{border-left-color:#0ea5e9}
 .ic-pv{fill:#0ea5e9}.ic-pv-abc{fill:#0ea5e9;stroke:#fff;stroke-width:1}svg text.ic-pv-t{fill:#0ea5e9;font-size:11px;font-weight:700}svg tspan.ic-wave-t{fill:#0ea5e9}
-.ic-time{stroke:#d946ef;stroke-dasharray:2 3;opacity:.8}.ic-time-hit{stroke:#d946ef;stroke-width:1.5;stroke-dasharray:4 2}svg text.ic-time-t,svg tspan.ic-time-t{fill:#d946ef;font-size:10px}
+.ic-time{stroke:#d946ef;stroke-dasharray:2 3;opacity:.8}.ic-time-hit{stroke:#d946ef;stroke-width:1.5;stroke-dasharray:4 2}svg text.ic-time-t,svg tspan.ic-time-t{fill:#d946ef;font-size:9px}
 `;

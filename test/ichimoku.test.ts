@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { backtest, classifyWave, ichimoku, linesAt, pivots, signalAt, targets, timeSignals, type Bar, type Pivot } from "../src/ichimoku";
+import { backtest, classifyWave, ichimoku, linesAt, pivots, signalAt, targets, timeSignals, waveScenarios, type Bar, type Pivot } from "../src/ichimoku";
 
 const mk = (closes: number[]): Bar[] => closes.map((c, i) => ({
   date: new Date(Date.UTC(2024, 0, 1) + i * 864e5).toISOString().slice(0, 10), open: c, high: c * 1.005, low: c * 0.995, close: c,
@@ -67,5 +67,25 @@ describe("wave / targets / time", () => {
     expect(r.levels.length).toBeGreaterThan(4);
     const bt = backtest(bars);
     expect(bt.stats.n).toBe(bt.samples.length);
+  });
+});
+
+describe("wave scenarios", () => {
+  it("lists both the large in-progress down wave and the small next-wave readings", () => {
+    // 6月高値→7月安値(第1波)→10月戻り高値(C)から下落中、という大きな読みと、9月安値→10月高値→押し目の小さな読み
+    const legs = [100, 120, 90, 105, 95, 115, 103];
+    const closes = zig(legs, 12);
+    const bars = mk(closes);
+    const end = bars.length - 1;
+    const sc = waveScenarios(bars, end);
+    // mk() は high/low を ±0.5% にするので丸めて比較
+    const key = (s: (typeof sc)[number]) => `${s.t.direction}:${[s.t.a, s.t.b, s.t.c].map((p) => Math.round(p.price / (p.type === "high" ? 1.005 : 0.995))).join("-")}`;
+    const keys = sc.map(key);
+    expect(keys[0]).toBe("down:120-90-115"); // 進行中の第3波が先頭
+    expect(sc[0].inProgress).toBe(true);
+    expect(sc[0].progress).toBeGreaterThan(0);
+    expect(keys).toContain("up:95-115-103"); // 押し目 C(未確定)からの上昇
+    expect(keys).toContain("up:90-115-103");
+    expect(keys.some((k) => k.startsWith("down:105-95"))).toBe(false); // C(115) が A(105) を超える読みは除外
   });
 });

@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { loadAnalyses, loadDailyAnalyses, loadDailyStrikes, loadHistory } from "./db";
+import { loadAnalyses, loadDailyAnalyses, loadDailyStrikes, loadEvaluated, loadHistory, loadLatestPrediction, loadModelLogs } from "./db";
 import type { DailyInput } from "./daily";
 import { decodeJpx, parseWeeklyCsv } from "./jpx";
 import { analyzeAndPost, ingestDaily, ingestManual, runPipeline } from "./pipeline";
@@ -9,13 +9,17 @@ import { INVESTORS, type Env, type WeekData } from "./types";
 const app = new Hono<{ Bindings: Env }>();
 
 app.get("/", async (c) => {
-  const [history, weeks, dailyHistory] = await Promise.all([loadAnalyses(c.env), loadHistory(c.env, undefined, 1), loadDailyAnalyses(c.env, 30)]);
+  const [history, weeks, dailyHistory, prediction, recent, logs] = await Promise.all([
+    loadAnalyses(c.env), loadHistory(c.env, undefined, 1), loadDailyAnalyses(c.env, 30),
+    loadLatestPrediction(c.env), loadEvaluated(c.env, 10), loadModelLogs(c.env, 1),
+  ]);
   const dl = dailyHistory[dailyHistory.length - 1];
   const strikes = dl ? await loadDailyStrikes(c.env, dl.tradeDate, dl.front.month) : [];
   c.header("Cache-Control", "public, max-age=300");
   return c.html(renderPage({
     latest: history[history.length - 1], history, week: weeks[0], siteUrl: c.env.SITE_URL,
     daily: { latest: dl, history: dailyHistory, strikes },
+    model: { prediction, recent, logs },
   }));
 });
 
@@ -29,6 +33,11 @@ app.get("/api/daily/latest", async (c) => {
   return a ? c.json(a) : c.json({ error: "no data" }, 404);
 });
 app.get("/api/daily/history", async (c) => c.json(await loadDailyAnalyses(c.env, 250)));
+app.get("/api/prediction/latest", async (c) => c.json(await loadLatestPrediction(c.env)));
+app.get("/api/prediction/track-record", async (c) => {
+  const [ev, logs] = await Promise.all([loadEvaluated(c.env, 1000), loadModelLogs(c.env, 1)]);
+  return c.json({ metrics: logs[0]?.metrics ?? null, weights: logs[0]?.weights ?? null, k: logs[0]?.k ?? null, evaluated: ev });
+});
 
 // ---- 管理 API (Authorization: Bearer ADMIN_TOKEN) ----
 app.use("/admin/*", async (c, next) => {
@@ -61,7 +70,12 @@ app.post("/admin/ingest-daily", async (c) => {
   }
   const r = await ingestDaily(c.env, d, c.req.query("post") === "force");
   const a = r.analysis;
-  return c.json({ tradeDate: a.tradeDate, spot: a.spot, pcr: a.pcr, maxPain: a.maxPain, putWall: a.putWall, callWall: a.callWall, atmIv: a.atmIv, post: r.post.status });
+  return c.json({
+    tradeDate: a.tradeDate, spot: a.spot, pcr: a.pcr, maxPain: a.maxPain, putWall: a.putWall, callWall: a.callWall, atmIv: a.atmIv,
+    prediction: { call: r.learn.prediction.call, pUp: r.learn.prediction.pUp, range: [r.learn.prediction.rangeLo, r.learn.prediction.rangeHi] },
+    evaluatedNow: r.learn.evaluatedNow, model: { n: r.learn.metrics.n, hitRate: r.learn.metrics.hitRate, rangeRate: r.learn.metrics.rangeRate, k: r.learn.k },
+    post: r.post.status,
+  });
 });
 
 /** JPX の週次 CSV をボディで送って解析結果だけ確認(保存しない) */

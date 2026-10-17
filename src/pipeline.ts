@@ -1,5 +1,6 @@
-import { analyzeDaily, type DailyInput } from "./daily";
-import { loadDailyAnalyses, logDailyPost, saveDaily, wasDailyPosted } from "./db";
+import { analyzeDaily, type DailyAnalysis, type DailyInput } from "./daily";
+import { evaluatePending, loadAnalyses, loadDailyAnalyses, loadEvaluated, logDailyPost, saveDaily, saveModelLog, savePrediction, wasDailyPosted } from "./db";
+import { calibrateK, features, fit, makePrediction, metrics, type Prediction } from "./model";
 import { composeDailyTweet } from "./x";
 import { analyze } from "./analysis";
 import { hasWeek, loadHistory, logPost, saveAnalysis, saveWeek, wasPosted } from "./db";
@@ -85,22 +86,47 @@ export async function ingestDaily(env: Env, d: DailyInput, forcePost = false) {
   const [prev] = (await loadDailyAnalyses(env, 1, d.tradeDate)).slice(-1);
   const a = analyzeDaily(d, prev);
   await saveDaily(env, d, a);
+  const learn = await learnAndPredict(env, a);
 
-  const text = composeDailyTweet(a, env.SITE_URL);
-  if (!forcePost && (await wasDailyPosted(env, a.tradeDate))) return { analysis: a, post: { status: "already_posted" } };
+  const text = composeDailyTweet(a, env.SITE_URL, learn.prediction, learn.lastResult);
+  if (!forcePost && (await wasDailyPosted(env, a.tradeDate))) return { analysis: a, learn, post: { status: "already_posted" } };
   const creds = xCreds(env);
   if (env.X_POST_ENABLED !== "true" || !creds) {
     await logDailyPost(env, a.tradeDate, text, "dry_run");
-    return { analysis: a, post: { status: "dry_run", text } };
+    return { analysis: a, learn, post: { status: "dry_run", text } };
   }
   try {
     const id = await postTweet(text, creds);
     await logDailyPost(env, a.tradeDate, text, "posted", id);
-    return { analysis: a, post: { status: "posted", tweetId: id, text } };
+    return { analysis: a, learn, post: { status: "posted", tweetId: id, text } };
   } catch (e) {
     await logDailyPost(env, a.tradeDate, text, "failed", undefined, String(e));
-    return { analysis: a, post: { status: "failed", text, error: String(e) } };
+    return { analysis: a, learn, post: { status: "failed", text, error: String(e) } };
   }
+}
+
+/**
+ * 1) 前営業日までの予測を今日の終値で答え合わせ
+ * 2) 検証済み全サンプルで重みとレンジ係数を再学習(自己補正)
+ * 3) 補正後のモデルで翌営業日の予測を出して保存
+ */
+export async function learnAndPredict(env: Env, a: DailyAnalysis) {
+  const evaluatedNow = await evaluatePending(env, a.tradeDate, a.spot);
+  const ev = await loadEvaluated(env);
+  const weights = fit(ev.map((e) => ({ x: e.x, y: e.actualSpot > e.spot ? 1 : 0 })));
+  const k = calibrateK(ev.map((e) => Math.abs(e.actualSpot - e.spot) / e.sigma1d));
+  const m = metrics(ev); // 各予測を出した時点のモデルでの成績(後知恵なしの実績)
+  await saveModelLog(env, { tradeDate: a.tradeDate, n: ev.length, weights, k, metrics: m });
+
+  const [weekly] = (await loadAnalyses(env, 1)).slice(-1);
+  const prediction: Prediction = makePrediction(a, features(a, weekly?.score ?? null), weights, k, ev.length);
+  await savePrediction(env, prediction);
+
+  const last = ev[ev.length - 1];
+  const lastResult = last && last.actualDate === a.tradeDate
+    ? { tradeDate: last.tradeDate, call: last.call, up: last.actualSpot > last.spot, change: last.actualSpot - last.spot }
+    : undefined;
+  return { prediction, metrics: m, weights, k, evaluatedNow, lastResult };
 }
 
 function xCreds(env: Env) {

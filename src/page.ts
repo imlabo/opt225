@@ -3,6 +3,9 @@ import { POSITION_WINDOW, WEIGHTS, Z_WINDOW } from "./analysis";
 import type { WeekData } from "./types";
 import type { DailyAnalysis, DailyStrike } from "./daily";
 import { DAILY_CSS, renderDailySection } from "./page-daily";
+import { renderModelSection } from "./page-model";
+import type { ModelLog, PredictionRow } from "./db";
+import type { Prediction } from "./model";
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 const fmt = (n: number) => (n > 0 ? "+" : "") + Math.round(n).toLocaleString("ja-JP");
@@ -39,6 +42,7 @@ function gauge(score: number): string {
 export function renderPage(opts: {
   latest?: Analysis; history: Analysis[]; week?: WeekData; siteUrl: string;
   daily?: { latest?: DailyAnalysis; history: DailyAnalysis[]; strikes: DailyStrike[] };
+  model?: { prediction: Prediction | null; recent: PredictionRow[]; logs: ModelLog[] };
 }): string {
   const { latest, history, week } = opts;
   const body = !latest
@@ -112,7 +116,7 @@ svg{width:100%;height:auto}svg text{fill:var(--muted);font-size:11px}.axis{strok
 details{font-size:14px}.section-title{font-size:16px;margin:28px 0 0}${DAILY_CSS}footer{color:var(--muted);font-size:12px}
 </style></head><body>
 <header><h1>日経225 OPフロー観測</h1><p>日経225オプションの建玉(日次)と個人・法人の売買(週次)から日経平均先物の方向感を推計・X自動投稿</p></header>
-<main>${opts.daily ? renderDailySection(opts.daily.latest, opts.daily.history, opts.daily.strikes) : ""}${body}
+<main>${opts.model ? renderModelSection(opts.model.prediction, opts.model.recent, opts.model.logs) : ""}${opts.daily ? renderDailySection(opts.daily.latest, opts.daily.history, opts.daily.strikes) : ""}${body}
 <section class="card"><details><summary><b>推計方法</b></summary>
 <p>データ: JPX「投資部門別取引状況(先物・オプション/週間)」の日経225オプション(コール/プット)売買枚数。JPXは部門別の<em>建玉</em>を公表していないため、売買差引を累積して<em>推定ポジション</em>としています。</p>
 <ol><li>方向性フロー = (コール買い−売り) − (プット買い−売り)</li>

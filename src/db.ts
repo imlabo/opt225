@@ -1,3 +1,4 @@
+import type { Evaluated, Features, Metrics, Prediction, Weights } from "./model";
 import type { DailyAnalysis, DailyInput, DailyStrike } from "./daily";
 import type { Analysis } from "./analysis";
 import type { Env, FlowRow, Product, Investor, WeekData } from "./types";
@@ -125,4 +126,68 @@ export async function logDailyPost(env: Env, tradeDate: string, text: string, st
      ON CONFLICT(trade_date) DO UPDATE SET tweet_id=excluded.tweet_id, text=excluded.text, status=excluded.status,
        error=excluded.error, posted_at=datetime('now')`,
   ).bind(tradeDate, tweetId ?? null, text, status, error ?? null).run();
+}
+
+// ---- 予測と答え合わせ ----
+
+export interface PredictionRow extends Evaluated {
+  status: string; actualDate: string | null; x: Features;
+}
+
+/** trade_date より前の未検証予測を、その日の終値で答え合わせする(営業日が飛んだものは skip) */
+export async function evaluatePending(env: Env, tradeDate: string, spot: number): Promise<number> {
+  const r = await env.DB.prepare("SELECT trade_date FROM predictions WHERE status = 'pending' AND trade_date < ? ORDER BY trade_date")
+    .bind(tradeDate).all<{ trade_date: string }>();
+  const stmts = r.results.map(({ trade_date }) => {
+    const gapDays = (Date.parse(tradeDate) - Date.parse(trade_date)) / 864e5;
+    return gapDays > 6
+      ? env.DB.prepare("UPDATE predictions SET status = 'skipped' WHERE trade_date = ?").bind(trade_date)
+      : env.DB.prepare("UPDATE predictions SET status = 'evaluated', actual_date = ?, actual_spot = ? WHERE trade_date = ?").bind(tradeDate, spot, trade_date);
+  });
+  if (stmts.length) await env.DB.batch(stmts);
+  return stmts.length;
+}
+
+const toRow = (x: Record<string, unknown>): PredictionRow => ({
+  tradeDate: String(x.trade_date), pUp: Number(x.p_up), call: x.call as PredictionRow["call"], spot: Number(x.spot),
+  actualSpot: Number(x.actual_spot), rangeLo: Number(x.range_lo), rangeHi: Number(x.range_hi), sigma1d: Number(x.sigma1d),
+  status: String(x.status), actualDate: (x.actual_date as string) ?? null, x: JSON.parse(String(x.features_json)),
+});
+
+export async function loadEvaluated(env: Env, limit = 1000): Promise<PredictionRow[]> {
+  const r = await env.DB.prepare("SELECT * FROM predictions WHERE status = 'evaluated' ORDER BY trade_date DESC LIMIT ?").bind(limit).all();
+  return r.results.map(toRow).reverse();
+}
+
+export async function savePrediction(env: Env, p: Prediction) {
+  await env.DB.prepare(
+    `INSERT INTO predictions (trade_date, spot, p_up, call, range_lo, range_hi, sigma1d, features_json, detail_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(trade_date) DO UPDATE SET spot=excluded.spot, p_up=excluded.p_up, call=excluded.call, range_lo=excluded.range_lo,
+       range_hi=excluded.range_hi, sigma1d=excluded.sigma1d, features_json=excluded.features_json, detail_json=excluded.detail_json
+     WHERE predictions.status = 'pending'`,
+  ).bind(p.tradeDate, p.spot, p.pUp, p.call, p.rangeLo, p.rangeHi, p.sigma1d, JSON.stringify(p.x), JSON.stringify(p)).run();
+}
+
+export async function loadLatestPrediction(env: Env): Promise<Prediction | null> {
+  const r = await env.DB.prepare("SELECT detail_json FROM predictions ORDER BY trade_date DESC LIMIT 1").first<{ detail_json: string }>();
+  return r ? (JSON.parse(r.detail_json) as Prediction) : null;
+}
+
+export interface ModelLog { tradeDate: string; n: number; weights: Weights; k: number; metrics: Metrics }
+
+export async function saveModelLog(env: Env, m: ModelLog) {
+  await env.DB.prepare(
+    `INSERT INTO model_log (trade_date, n, weights_json, k, metrics_json) VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(trade_date) DO UPDATE SET n=excluded.n, weights_json=excluded.weights_json, k=excluded.k,
+       metrics_json=excluded.metrics_json, created_at=datetime('now')`,
+  ).bind(m.tradeDate, m.n, JSON.stringify(m.weights), m.k, JSON.stringify(m.metrics)).run();
+}
+
+export async function loadModelLogs(env: Env, limit = 60): Promise<ModelLog[]> {
+  const r = await env.DB.prepare("SELECT * FROM model_log ORDER BY trade_date DESC LIMIT ?").bind(limit).all<Record<string, unknown>>();
+  return r.results.map((x) => ({
+    tradeDate: String(x.trade_date), n: Number(x.n), k: Number(x.k),
+    weights: JSON.parse(String(x.weights_json)), metrics: JSON.parse(String(x.metrics_json)),
+  })).reverse();
 }

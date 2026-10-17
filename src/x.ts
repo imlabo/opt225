@@ -1,5 +1,6 @@
 import type { Analysis } from "./analysis";
 import type { DailyAnalysis } from "./daily";
+import type { Prediction } from "./model";
 
 /** RFC3986 percent-encode (OAuth 1.0a) */
 export const pct = (s: string) =>
@@ -98,7 +99,10 @@ export function composeTweet(a: Analysis, siteUrl: string): string {
 
 const yen = (n: number) => Math.round(n).toLocaleString("ja-JP");
 
-export function composeDailyTweet(a: DailyAnalysis, siteUrl: string): string {
+export interface LastResult { tradeDate: string; call: "up" | "down" | "flat"; up: boolean; change: number }
+
+export function composeDailyTweet(a: DailyAnalysis, siteUrl: string, p?: Prediction, last?: LastResult): string {
+  const callLabel = (c: string) => (c === "up" ? "上昇" : c === "down" ? "下落" : "中立");
   const m = `${Number(a.front.month.slice(4))}月限`;
   const lines = [
     `【日経225OP 日次 ${a.tradeDate.slice(5).replace("-", "/")}】`,
@@ -106,8 +110,9 @@ export function composeDailyTweet(a: DailyAnalysis, siteUrl: string): string {
     `${m}(SQまで${a.front.days}日)`,
     a.putWall && a.callWall ? `建玉の壁 下${yen(a.putWall.strike)} / 上${yen(a.callWall.strike)}` : "",
     a.maxPain ? `最大苦痛 ${yen(a.maxPain)} / P/C比 ${a.pcr.toFixed(2)}` : `P/C比 ${a.pcr.toFixed(2)}`,
-    a.atmIv && a.expectedMove ? `ATM IV ${a.atmIv.toFixed(1)}% 1σ ±${yen(a.expectedMove)}` : "",
-    "※機械的集計・投資助言ではありません",
+    p ? `翌営業日: ${callLabel(p.call)}(上昇確率${Math.round(p.pUp * 100)}%) ${yen(p.rangeLo)}〜${yen(p.rangeHi)}` : "",
+    last && last.call !== "flat" ? `前回予測: ${callLabel(last.call)}→${last.up ? "上昇" : "下落"}${(last.call === "up") === last.up ? "◯" : "×"}` : "",
+    "※機械的推計・投資助言ではありません",
     "#日経225オプション",
     siteUrl,
   ].filter(Boolean);

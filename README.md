@@ -75,10 +75,20 @@ CSV(約4MB)と Excel の解析は Workers 無料枠の CPU 時間(10ms)に収ま
 
 公開 API: `GET /api/prediction/latest`, `GET /api/prediction/track-record`
 
+## 市場心理: Fear & Greed (`src/sentiment.ts`)
+- **CNN Fear & Greed(米国株)**: CNN のサイト表示用データ(`production.dataviz.cnn.io/index/fearandgreed/graphdata`)を取得して表示。公式 API ではないため、仕様変更で取得できなくなる可能性があります。出典表記とリンクを掲載。
+- **日経225 Fear & Greed(本サイト独自)**: 日経平均には公式の同種指数がないため、CNN と同じ考え方で算出。各指標の当日値が過去 500 営業日の中で占める位置(パーセンタイル)を 0〜100 に換算して平均。
+  - 株価の勢い(125日線乖離)・株価の強さ(52週レンジ内の位置)・ボラティリティ(日経平均VIの50日線乖離)・VI水準:日経公式 CSV(2023年〜)
+  - P/C建玉比・プットスキュー:本サイトの日次データ(20営業日たまってから算入)
+- 両指数とも予測モデルの特徴量に追加(事前の重みは 0 で、効くかどうかは答え合わせの実績で学習)。
+
+公開 API: `GET /api/sentiment`
+
 ## 管理 API (`Authorization: Bearer ADMIN_TOKEN`)
 | エンドポイント | 内容 |
 |---|---|
 | `POST /admin/run[?force=1&backfill=N]` | 取得→分析→投稿を手動実行 |
+| `POST /admin/ingest-sentiment` | 市場心理指数の投入(daily ワークフローから) |
 | `POST /admin/ingest-daily[?post=force]` | 日次データ投入(daily ワークフローから) |
 | `POST /admin/ingest[?post=1]` | 週データを JSON で直接投入(JPX レイアウト変更時のフォールバック) |
 | `POST /admin/parse-preview` | JPX の週次 CSV をボディで送って解析結果のみ確認 (`--data-binary @file.csv`) |

@@ -1,3 +1,4 @@
+import { ratingOf, type CnnFg, type FgPoint } from "./sentiment";
 import type { Evaluated, Features, Metrics, Prediction, Weights } from "./model";
 import type { DailyAnalysis, DailyInput, DailyStrike } from "./daily";
 import type { Analysis } from "./analysis";
@@ -190,4 +191,56 @@ export async function loadModelLogs(env: Env, limit = 60): Promise<ModelLog[]> {
     tradeDate: String(x.trade_date), n: Number(x.n), k: Number(x.k),
     weights: JSON.parse(String(x.weights_json)), metrics: JSON.parse(String(x.metrics_json)),
   })).reverse();
+}
+
+// ---- 市場心理 ----
+export interface SentimentPayload {
+  nikkei: FgPoint[]; // 日付昇順(直近分のみでも可)
+  cnn?: CnnFg;
+}
+
+export async function saveSentiment(env: Env, s: SentimentPayload) {
+  const nk = env.DB.prepare(
+    `INSERT INTO fg_nikkei (date, score, rating, components_json) VALUES (?, ?, ?, ?)
+     ON CONFLICT(date) DO UPDATE SET score=excluded.score, rating=excluded.rating, components_json=excluded.components_json`,
+  );
+  const cn = env.DB.prepare(
+    `INSERT INTO fg_cnn (date, score, rating) VALUES (?, ?, ?) ON CONFLICT(date) DO UPDATE SET score=excluded.score, rating=excluded.rating`,
+  );
+  const stmts = [
+    ...s.nikkei.map((p) => nk.bind(p.date, p.score, p.rating, JSON.stringify(p.components))),
+    ...(s.cnn ? [...s.cnn.history.map((p) => cn.bind(p.date, p.value, ratingOf(p.value))), cn.bind(s.cnn.date, s.cnn.score, s.cnn.rating)] : []),
+  ];
+  if (s.cnn) {
+    const { history: _h, ...meta } = s.cnn;
+    stmts.push(env.DB.prepare(
+      `INSERT INTO fg_meta (key, value_json) VALUES ('cnn', ?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json, updated_at=datetime('now')`,
+    ).bind(JSON.stringify(meta)));
+  }
+  for (let i = 0; i < stmts.length; i += 200) await env.DB.batch(stmts.slice(i, i + 200));
+  return stmts.length;
+}
+
+export interface SentimentView {
+  nikkei: FgPoint | null;
+  nikkeiHistory: { date: string; score: number }[];
+  cnn: Omit<CnnFg, "history"> | null;
+  cnnHistory: { date: string; score: number }[];
+}
+
+export async function loadSentiment(env: Env, days = 365, asOf?: string): Promise<SentimentView> {
+  const since = new Date(Date.parse(asOf ?? new Date().toISOString().slice(0, 10)) - days * 864e5).toISOString().slice(0, 10);
+  const until = asOf ?? "9999-12-31";
+  const [nk, cn, meta] = await Promise.all([
+    env.DB.prepare("SELECT date, score, rating, components_json FROM fg_nikkei WHERE date >= ? AND date <= ? ORDER BY date").bind(since, until).all<Record<string, unknown>>(),
+    env.DB.prepare("SELECT date, score FROM fg_cnn WHERE date >= ? AND date <= ? ORDER BY date").bind(since, until).all<{ date: string; score: number }>(),
+    env.DB.prepare("SELECT value_json FROM fg_meta WHERE key = 'cnn'").first<{ value_json: string }>(),
+  ]);
+  const last = nk.results[nk.results.length - 1];
+  return {
+    nikkei: last ? { date: String(last.date), score: Number(last.score), rating: last.rating as FgPoint["rating"], components: JSON.parse(String(last.components_json)) } : null,
+    nikkeiHistory: nk.results.map((r) => ({ date: String(r.date), score: Number(r.score) })),
+    cnn: meta ? JSON.parse(meta.value_json) : null,
+    cnnHistory: cn.results,
+  };
 }

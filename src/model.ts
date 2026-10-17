@@ -9,7 +9,7 @@
  */
 import type { DailyAnalysis } from "./daily";
 
-export const FEATURES = ["pain", "dPcr", "dIv", "skew", "wallPos", "basis", "weekly", "momentum"] as const;
+export const FEATURES = ["pain", "dPcr", "dIv", "skew", "wallPos", "basis", "weekly", "momentum", "fgNikkei", "fgCnn"] as const;
 export type FeatureName = (typeof FEATURES)[number];
 export type Features = Record<FeatureName, number>;
 
@@ -22,6 +22,8 @@ export const FEATURE_LABEL: Record<FeatureName, string> = {
   basis: "先物プレミアム",
   weekly: "週次スコア(個人・法人)",
   momentum: "前日比の勢い",
+  fgNikkei: "日経225 Fear & Greed",
+  fgCnn: "CNN Fear & Greed(米国)",
 };
 
 /** 事前仮説(学習前の重み)。切片 + 各特徴量 */
@@ -35,6 +37,8 @@ export const PRIOR: { bias: number } & Features = {
   basis: 0,
   weekly: 0.3, // 週次スコアの方向
   momentum: 0,
+  fgNikkei: 0, // 逆張り/順張りどちらに効くかは実績で判断
+  fgCnn: 0,
 };
 export const RIDGE = 4; // 事前仮説への引き戻しの強さ
 export const TRADING_DAYS = 245;
@@ -46,7 +50,9 @@ export const sigmoid = (z: number) => 1 / (1 + Math.exp(-z));
 /** 1 営業日の 1σ 変動幅(円) */
 export const oneDaySigma = (a: DailyAnalysis) => (a.atmIv ? a.spot * (a.atmIv / 100) * Math.sqrt(1 / TRADING_DAYS) : a.spot * 0.012);
 
-export function features(a: DailyAnalysis, weeklyScore: number | null): Features {
+export interface Sentiments { nikkei?: number | null; cnn?: number | null }
+
+export function features(a: DailyAnalysis, weeklyScore: number | null, fg: Sentiments = {}): Features {
   const em = a.expectedMove || a.spot * 0.05;
   const gravity = a.front.days <= 10 ? 1 : 0.3;
   const span = a.putWall && a.callWall ? a.callWall.strike - a.putWall.strike : 0;
@@ -59,13 +65,15 @@ export function features(a: DailyAnalysis, weeklyScore: number | null): Features
     basis: clip(a.fut ? ((a.fut.price - a.spot) / a.spot) * 100 : 0),
     weekly: clip(weeklyScore != null ? weeklyScore / 100 : 0, 1),
     momentum: clip(a.prev ? (a.spot - a.prev.spot) / oneDaySigma(a) : 0),
+    fgNikkei: clip(fg.nikkei != null ? (fg.nikkei - 50) / 25 : 0),
+    fgCnn: clip(fg.cnn != null ? (fg.cnn - 50) / 25 : 0),
   };
 }
 
 export type Weights = typeof PRIOR;
 const vec = (w: Weights) => [w.bias, ...FEATURES.map((f) => w[f])];
 const unvec = (v: number[]): Weights => Object.fromEntries([["bias", v[0]], ...FEATURES.map((f, i) => [f, v[i + 1]])]) as Weights;
-const row = (x: Features) => [1, ...FEATURES.map((f) => x[f])];
+const row = (x: Features) => [1, ...FEATURES.map((f) => x[f] ?? 0)];
 
 export function predictProb(w: Weights, x: Features): number {
   const v = vec(w), r = row(x);

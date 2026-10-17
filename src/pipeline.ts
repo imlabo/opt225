@@ -1,5 +1,5 @@
 import { analyzeDaily, type DailyAnalysis, type DailyInput } from "./daily";
-import { evaluatePending, loadAnalyses, loadDailyAnalyses, loadEvaluated, logDailyPost, saveDaily, saveModelLog, savePrediction, wasDailyPosted } from "./db";
+import { evaluatePending, loadAnalyses, loadSentiment, loadDailyAnalyses, loadEvaluated, logDailyPost, saveDaily, saveModelLog, savePrediction, wasDailyPosted } from "./db";
 import { calibrateK, features, fit, makePrediction, metrics, type Prediction } from "./model";
 import { composeDailyTweet } from "./x";
 import { analyze } from "./analysis";
@@ -88,7 +88,7 @@ export async function ingestDaily(env: Env, d: DailyInput, forcePost = false) {
   await saveDaily(env, d, a);
   const learn = await learnAndPredict(env, a);
 
-  const text = composeDailyTweet(a, env.SITE_URL, learn.prediction, learn.lastResult);
+  const text = composeDailyTweet(a, env.SITE_URL, learn.prediction, learn.lastResult, learn.fg);
   if (!forcePost && (await wasDailyPosted(env, a.tradeDate))) return { analysis: a, learn, post: { status: "already_posted" } };
   const creds = xCreds(env);
   if (env.X_POST_ENABLED !== "true" || !creds) {
@@ -119,14 +119,16 @@ export async function learnAndPredict(env: Env, a: DailyAnalysis) {
   await saveModelLog(env, { tradeDate: a.tradeDate, n: ev.length, weights, k, metrics: m });
 
   const [weekly] = (await loadAnalyses(env, 1)).slice(-1);
-  const prediction: Prediction = makePrediction(a, features(a, weekly?.score ?? null), weights, k, ev.length);
+  const fg = await loadSentiment(env, 7, a.tradeDate);
+  const fgSet = { nikkei: fg.nikkei?.score ?? null, cnn: fg.cnnHistory[fg.cnnHistory.length - 1]?.score ?? null };
+  const prediction: Prediction = makePrediction(a, features(a, weekly?.score ?? null, fgSet), weights, k, ev.length);
   await savePrediction(env, prediction);
 
   const last = ev[ev.length - 1];
   const lastResult = last && last.actualDate === a.tradeDate
     ? { tradeDate: last.tradeDate, call: last.call, up: last.actualSpot > last.spot, change: last.actualSpot - last.spot }
     : undefined;
-  return { prediction, metrics: m, weights, k, evaluatedNow, lastResult };
+  return { prediction, metrics: m, weights, k, evaluatedNow, lastResult, fg: fgSet };
 }
 
 function xCreds(env: Env) {

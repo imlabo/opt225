@@ -1,43 +1,87 @@
-// JPX の日次ファイル(建玉・清算値段)を取得・解析し、Worker に送る
-// usage: npx tsx scripts/daily-fetch.mts [--dry] [--out file.json]
-//   env: SITE_URL, ADMIN_TOKEN
+// 日次の取得・解析・送信(GitHub Actions から実行)
+//  1) JPX 日次ファイル(建玉・清算値段)を取得・解析
+//  2) 市場心理指数: 日経公式 CSV(日経平均・日経平均VI)と CNN Fear & Greed を取得し、日経225 Fear & Greed を算出して送信
+//  3) 日次データを送信(Worker 側で答え合わせ → 再学習 → 予測 → X 投稿)
+// usage: npx tsx scripts/daily-fetch.mts [--dry] [--out file.json]   env: SITE_URL, ADMIN_TOKEN
 import { writeFileSync } from "node:fs";
+import { analyzeDaily, type DailyInput } from "../src/daily.ts";
 import { OI_PAGE, OI_RE, RB_PAGE, RB_RE, buildDailyInput, decodeSjis, findLink, parseOiWorkbook, parseSettlementCsv } from "../src/jpx-daily.ts";
+import { computeNikkeiFg, parseCnn, parseNikkeiCsv, type CnnFg, type Point } from "../src/sentiment.ts";
 
-const UA = "Mozilla/5.0 (compatible; opt225/1.0)";
+const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36";
+const NK_CSV = "https://indexes.nikkei.co.jp/nkave/historical/nikkei_stock_average_daily_jp.csv";
+const VI_CSV = "https://indexes.nikkei.co.jp/nkave/historical/nikkei_stock_average_vi_daily_jp.csv";
+const CNN_URL = "https://production.dataviz.cnn.io/index/fearandgreed/graphdata";
+
 const args = process.argv.slice(2);
 const dry = args.includes("--dry");
 const outFile = args.includes("--out") ? args[args.indexOf("--out") + 1] : undefined;
+const site = process.env.SITE_URL, token = process.env.ADMIN_TOKEN;
 const get = async (u: string) => {
-  const r = await fetch(u, { headers: { "User-Agent": UA } });
+  const r = await fetch(u, { headers: { "User-Agent": UA, Referer: new URL(u).origin + "/" } });
   if (!r.ok) throw new Error(`${u} HTTP ${r.status}`);
   return r;
 };
+const post = async (path: string, body: unknown) => {
+  if (dry) return console.log(`[dry] POST ${path}`);
+  if (!site || !token) throw new Error("SITE_URL / ADMIN_TOKEN not set");
+  const res = await fetch(`${site}${path}`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const text = await res.text();
+  console.log(`::notice title=${path} ${res.status}::${text.slice(0, 900)}`);
+  if (!res.ok) throw new Error(`${path} HTTP ${res.status}`);
+};
 
-const oiLink = findLink(await (await get(OI_PAGE)).text(), OI_PAGE, OI_RE);
-const rbLink = findLink(await (await get(RB_PAGE)).text(), RB_PAGE, RB_RE);
-console.log("OI:", oiLink, "\nRB:", rbLink);
-if (!oiLink || !rbLink) throw new Error("daily file link not found");
-if (oiLink.date !== rbLink.date) {
-  console.log(`::notice::dates differ (OI ${oiLink.date} / RB ${rbLink.date}) — not yet published, skip`);
-  process.exit(0);
+// ---- 1) JPX 日次 ----
+let input: DailyInput | undefined;
+try {
+  const oiLink = findLink(await (await get(OI_PAGE)).text(), OI_PAGE, OI_RE);
+  const rbLink = findLink(await (await get(RB_PAGE)).text(), RB_PAGE, RB_RE);
+  console.log("OI:", oiLink, "\nRB:", rbLink);
+  if (!oiLink || !rbLink) throw new Error("daily file link not found");
+  if (oiLink.date !== rbLink.date) {
+    console.log(`::notice::JPX dates differ (OI ${oiLink.date} / RB ${rbLink.date}) — not yet published`);
+  } else {
+    const oi = parseOiWorkbook(new Uint8Array(await (await get(oiLink.url)).arrayBuffer()));
+    const rb = parseSettlementCsv(decodeSjis(new Uint8Array(await (await get(rbLink.url)).arrayBuffer())));
+    if (oi.date && oi.date !== oiLink.date) console.log(`::warning::OI sheet date ${oi.date} != file date ${oiLink.date}`);
+    input = buildDailyInput(oiLink.date, oi, rb, [oiLink.url, rbLink.url]);
+    console.log(`trade ${input.tradeDate} spot ${input.spot} strikes ${input.strikes.length}`);
+    if (outFile) writeFileSync(outFile, JSON.stringify(input));
+  }
+} catch (e) {
+  console.log(`::error title=JPX daily::${e}`);
 }
 
-const oi = parseOiWorkbook(new Uint8Array(await (await get(oiLink.url)).arrayBuffer()));
-const rb = parseSettlementCsv(decodeSjis(new Uint8Array(await (await get(rbLink.url)).arrayBuffer())));
-if (oi.date && oi.date !== oiLink.date) console.log(`::warning::OI sheet date ${oi.date} != file date ${oiLink.date}`);
-const input = buildDailyInput(oiLink.date, oi, rb, [oiLink.url, rbLink.url]);
-console.log(`trade ${input.tradeDate} spot ${input.spot} months ${input.months.map((m) => `${m.month}(${m.days}d)`).join(",")} strikes ${input.strikes.length} (put ${oi.put.length} / call ${oi.call.length})`);
-if (outFile) writeFileSync(outFile, JSON.stringify(input));
-if (dry) process.exit(0);
+// ---- 2) 市場心理 ----
+try {
+  const prices = parseNikkeiCsv(decodeSjis(new Uint8Array(await (await get(NK_CSV)).arrayBuffer())));
+  const vi = parseNikkeiCsv(decodeSjis(new Uint8Array(await (await get(VI_CSV)).arrayBuffer())));
+  // 日経 CSV がまだ当日分を含まない場合は JPX の原資産価格で補う
+  if (input && prices.length && prices[prices.length - 1].date < input.tradeDate) prices.push({ date: input.tradeDate, value: input.spot });
 
-const site = process.env.SITE_URL, token = process.env.ADMIN_TOKEN;
-if (!site || !token) throw new Error("SITE_URL / ADMIN_TOKEN not set");
-const res = await fetch(`${site}/admin/ingest-daily`, {
-  method: "POST",
-  headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-  body: JSON.stringify(input),
-});
-const body = await res.text();
-console.log(`::notice title=ingest-daily ${res.status}::${body.slice(0, 900)}`);
-if (!res.ok) process.exit(1);
+  // 本サイトで蓄積した P/C比・スキュー(公開 API)+ 当日分
+  const own = { pcr: [] as Point[], skew: [] as Point[] };
+  if (site) {
+    try {
+      const hist = (await (await fetch(`${site}/api/daily/history`)).json()) as { tradeDate: string; pcr: number; skew: number | null }[];
+      for (const h of hist) { own.pcr.push({ date: h.tradeDate, value: h.pcr }); if (h.skew != null) own.skew.push({ date: h.tradeDate, value: h.skew }); }
+    } catch (e) { console.log(`::warning::daily history fetch failed: ${e}`); }
+  }
+  if (input) {
+    const a = analyzeDaily(input);
+    own.pcr = own.pcr.filter((p) => p.date !== a.tradeDate).concat({ date: a.tradeDate, value: a.pcr });
+    if (a.skew != null) own.skew = own.skew.filter((p) => p.date !== a.tradeDate).concat({ date: a.tradeDate, value: a.skew });
+  }
+  const since = new Date(Date.now() - 400 * 864e5).toISOString().slice(0, 10);
+  const nikkei = computeNikkeiFg(prices, vi, own, since);
+  let cnn: CnnFg | undefined;
+  try { cnn = parseCnn(await (await get(CNN_URL)).json()); } catch (e) { console.log(`::warning title=CNN::${e}`); }
+  const last = nikkei[nikkei.length - 1];
+  console.log(`Nikkei F&G ${last?.date} ${last?.score.toFixed(1)} ${last?.rating} (${nikkei.length} pts) / CNN ${cnn?.date} ${cnn?.score.toFixed(1)} ${cnn?.rating}`);
+  await post("/admin/ingest-sentiment", { nikkei, cnn });
+} catch (e) {
+  console.log(`::error title=Sentiment::${e}`);
+}
+
+// ---- 3) 日次データ送信 ----
+if (input) await post("/admin/ingest-daily", input);

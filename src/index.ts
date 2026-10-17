@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { loadAnalyses, loadDailyAnalyses, loadDailyStrikes, loadEvaluated, loadHistory, loadLatestPrediction, loadModelLogs } from "./db";
+import { loadAnalyses, loadDailyAnalyses, loadDailyStrikes, loadEvaluated, loadHistory, loadLatestPrediction, loadModelLogs, loadSentiment, saveSentiment, type SentimentPayload } from "./db";
 import type { DailyInput } from "./daily";
 import { decodeJpx, parseWeeklyCsv } from "./jpx";
 import { analyzeAndPost, ingestDaily, ingestManual, runPipeline } from "./pipeline";
@@ -13,6 +13,7 @@ app.get("/", async (c) => {
     loadAnalyses(c.env), loadHistory(c.env, undefined, 1), loadDailyAnalyses(c.env, 30),
     loadLatestPrediction(c.env), loadEvaluated(c.env, 10), loadModelLogs(c.env, 1),
   ]);
+  const sentiment = await loadSentiment(c.env, 400);
   const dl = dailyHistory[dailyHistory.length - 1];
   const strikes = dl ? await loadDailyStrikes(c.env, dl.tradeDate, dl.front.month) : [];
   c.header("Cache-Control", "public, max-age=300");
@@ -20,6 +21,7 @@ app.get("/", async (c) => {
     latest: history[history.length - 1], history, week: weeks[0], siteUrl: c.env.SITE_URL,
     daily: { latest: dl, history: dailyHistory, strikes },
     model: { prediction, recent, logs },
+    sentiment,
   }));
 });
 
@@ -33,6 +35,7 @@ app.get("/api/daily/latest", async (c) => {
   return a ? c.json(a) : c.json({ error: "no data" }, 404);
 });
 app.get("/api/daily/history", async (c) => c.json(await loadDailyAnalyses(c.env, 250)));
+app.get("/api/sentiment", async (c) => c.json(await loadSentiment(c.env, Number(c.req.query("days") ?? 365))));
 app.get("/api/prediction/latest", async (c) => c.json(await loadLatestPrediction(c.env)));
 app.get("/api/prediction/track-record", async (c) => {
   const [ev, logs] = await Promise.all([loadEvaluated(c.env, 1000), loadModelLogs(c.env, 1)]);
@@ -60,6 +63,15 @@ app.post("/admin/ingest", async (c) => {
   }
   await ingestManual(c.env, w);
   return c.json(c.req.query("post") === "1" ? await analyzeAndPost(c.env) : { ok: true });
+});
+
+/** 市場心理指数の投入(GitHub Actions の scripts/daily-fetch.mts から) */
+app.post("/admin/ingest-sentiment", async (c) => {
+  const s = await c.req.json<SentimentPayload>();
+  if (!Array.isArray(s.nikkei)) return c.json({ error: "invalid body" }, 400);
+  const n = await saveSentiment(c.env, s);
+  const last = s.nikkei[s.nikkei.length - 1];
+  return c.json({ rows: n, nikkei: last && { date: last.date, score: last.score, rating: last.rating }, cnn: s.cnn && { date: s.cnn.date, score: s.cnn.score } });
 });
 
 /** 日次データ投入(GitHub Actions の scripts/daily-fetch.mts から)。?post=force で再投稿 */

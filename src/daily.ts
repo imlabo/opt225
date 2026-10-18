@@ -21,6 +21,8 @@ export interface IchimokuPayload {
   series?: "nikkei" | "futures"; // 計算のベース。未設定は nikkei
   filled?: string[]; // Yahoo で補った日付
   inProgress?: string; // 最後の足が取引中(ナイトセッション中など)ならその日付
+  symbol?: string; // 先物の銘柄(NIY=F / NKD=F)
+  repaired?: number; // 4本値が欠けていて前日終値から補った足の本数(表示期間内)
   backtest: Backtest;
   prior: Record<string, number>; // バックテストで学習した一目特徴量の重み(予測モデルの事前仮説)
   chart: { date: string; high: number; low: number; open: number; close: number; tenkan?: number; kijun?: number; spanA?: number; spanB?: number }[];

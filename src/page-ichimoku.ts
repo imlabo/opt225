@@ -160,7 +160,7 @@ export function renderIchimokuSection(ic: IchiView | undefined): string {
   CONV = fut ? (v) => `現物換算 ${yen(v - basis)}` : (v) => `先物換算 ${yen(v + basis)}`;
   const f = (v: number) => `${yen(v)}<small class="muted"> (${CONV(v)})</small>`;
   const srcNote = fut
-    ? `日経225先物ベース(CME 円建て NIY=F 継続足, Yahoo Finance)${ic.inProgress ? `・${md(ic.inProgress)} の足は取引中(ナイトセッション含む暫定)` : ""}・現物換算はベーシス ${basis >= 0 ? "−" : "+"}${yen(Math.abs(basis))}円`
+    ? `日経225先物ベース(CME ${ic.symbol ?? "NIY=F"} 継続足, Yahoo Finance)${ic.inProgress ? `・${md(ic.inProgress)} の足は取引中(ナイトセッション含む暫定)` : ""}${ic.repaired ? `・${ic.repaired}本は4本値が欠けており前日終値から補完` : ""}・現物換算はベーシス ${basis >= 0 ? "−" : "+"}${yen(Math.abs(basis))}円`
     : `日経平均ベース${ic.barsSource === "nikkei+jpx" ? "(当日足は終値のみで仮計算)" : ic.barsSource === "nikkei+yahoo" ? `(${(ic.filled ?? []).map(md).join("・")} の足は Yahoo Finance で補完)` : ""}・先物換算はベーシス ${basis >= 0 ? "+" : ""}${yen(basis)}円`;
   const sig = SIGNAL_KEYS.map((k) => {
     const v = r.signal[k];

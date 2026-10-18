@@ -10,6 +10,31 @@ export const YAHOO_FUTURES_URLS = [
   "https://query2.finance.yahoo.com/v8/finance/chart/NIY%3DF?interval=1d&range=5y",
   "https://query1.finance.yahoo.com/v8/finance/chart/NIY%3DF?interval=1d&range=5y",
 ];
+/** 代替: CME ドル建て日経225先物(NKD=F)。価格は同じ指数ポイントで、出来高が多くデータ欠けが少ないことがある */
+export const YAHOO_FUTURES_ALT_URLS = [
+  "https://query2.finance.yahoo.com/v8/finance/chart/NKD%3DF?interval=1d&range=5y",
+  "https://query1.finance.yahoo.com/v8/finance/chart/NKD%3DF?interval=1d&range=5y",
+];
+
+/** 4 本値が欠けている足(高値 = 安値、または値幅が 0.05% 未満。Yahoo の先物データは終値だけの日がある) */
+export const isDegenerate = (b: Bar) => b.high - b.low < b.close * 0.0005;
+
+/**
+ * 欠けている足を前日終値から補う: 始値 = 前日終値、高値・安値 = 当日終値と前日終値の範囲。
+ * 実際の値幅より小さい控えめな推定で、点になっていたローソク足を最低限の形にする。戻り値は補った本数
+ */
+export function repairDegenerate(bars: Bar[]): { bars: Bar[]; repaired: string[] } {
+  const out = bars.map((b) => ({ ...b }));
+  const repaired: string[] = [];
+  for (let i = 1; i < out.length; i++) {
+    const b = out[i];
+    if (!isDegenerate(b)) continue;
+    const pc = out[i - 1].close;
+    out[i] = { date: b.date, open: pc, close: b.close, high: Math.max(pc, b.close, b.high), low: Math.min(pc, b.close, b.low) };
+    repaired.push(b.date);
+  }
+  return { bars: out, repaired };
+}
 
 export const YAHOO_URLS = [
   "https://query2.finance.yahoo.com/v8/finance/chart/%5EN225?interval=1d&range=3mo",

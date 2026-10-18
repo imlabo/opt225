@@ -9,7 +9,7 @@ import { OI_PAGE, OI_RE, RB_PAGE, RB_RE, buildDailyInput, decodeSjis, findLink, 
 import { computeNikkeiFg, parseCnn, parseNikkeiCsv, type CnnFg, type Point } from "../src/sentiment.ts";
 import { parseNikkeiOhlc, type Bar } from "../src/ichimoku.ts";
 import { buildIchimoku } from "../src/ichimoku-payload.ts";
-import { latestTradingDate, mergeBars, parseYahooChart, YAHOO_FUTURES_URLS, YAHOO_URLS } from "../src/yahoo.ts";
+import { isDegenerate, latestTradingDate, mergeBars, parseYahooChart, repairDegenerate, YAHOO_FUTURES_ALT_URLS, YAHOO_FUTURES_URLS, YAHOO_URLS } from "../src/yahoo.ts";
 import type { IchimokuPayload } from "../src/daily.ts";
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36";
@@ -72,17 +72,30 @@ const lastBar = merged.bars[merged.bars.length - 1];
 console.log(`bars: nikkei last ${parseNikkeiOhlc(nkText).at(-1)?.date ?? "-"} / yahoo last ${yahoo.at(-1)?.date ?? "-"} / filled [${merged.added.join(",")}] / asOf ${asOf}`);
 
 // 一目均衡表は日経225先物(CME 円建て NIY=F, Yahoo Finance)の日足で計算。取れなければ日経平均で代替
-let futures: ReturnType<typeof parseYahooChart> = [] as unknown as ReturnType<typeof parseYahooChart>;
-for (const u of YAHOO_FUTURES_URLS) {
-  try { futures = parseYahooChart(await (await get(u)).json(), Date.now(), "cme"); break; }
-  catch (e) { console.log(`::warning title=Yahoo futures::${u} ${e}`); }
+// NIY=F(円建て)と NKD=F(ドル建て、同じ指数ポイント)を取り、直近 250 本で 4 本値の欠け(点になる足)が少ない方を使う
+type Fut = ReturnType<typeof parseYahooChart>;
+const fetchFut = async (urls: string[]) => {
+  for (const u of urls) {
+    try { return parseYahooChart(await (await get(u)).json(), Date.now(), "cme"); }
+    catch (e) { console.log(`::warning title=Yahoo futures::${u} ${e}`); }
+  }
+  return [] as unknown as Fut;
+};
+const cands: { symbol: string; bars: Fut; bad: number }[] = [];
+for (const [symbol, urls] of [["NIY=F", YAHOO_FUTURES_URLS], ["NKD=F", YAHOO_FUTURES_ALT_URLS]] as const) {
+  const b = await fetchFut([...urls]);
+  const bad = b.slice(-250).filter(isDegenerate).length;
+  console.log(`futures ${symbol}: ${b.length} bars, last ${b.at(-1)?.date ?? "-"} ${b.at(-1)?.close ?? ""}${b.inProgress ? ` (in progress ${b.inProgress})` : ""}, degenerate ${bad}/250`);
+  if (b.length) cands.push({ symbol, bars: b, bad });
 }
-console.log(`futures: ${futures.length} bars, last ${futures.at(-1)?.date ?? "-"} ${futures.at(-1)?.close ?? ""}${futures.inProgress ? ` (in progress ${futures.inProgress})` : ""}`);
+cands.sort((a, b) => a.bad - b.bad || b.bars.length - a.bars.length);
+const best = cands[0];
 
 let ichimoku: IchimokuPayload | undefined;
-const futAsOf = futures.at(-1)?.date ?? "";
-if (futures.length >= 200 && futAsOf >= asOf) {
-  try { ichimoku = buildIchimoku(futures, futAsOf, null, [], { series: "futures", inProgress: futures.inProgress }); }
+if (best && best.bars.length >= 200 && (best.bars.at(-1)?.date ?? "") >= asOf) {
+  const { bars: fb, repaired } = repairDegenerate(best.bars);
+  console.log(`futures: using ${best.symbol}, repaired ${repaired.length} bars${repaired.length ? ` (last: ${repaired.slice(-5).join(",")})` : ""}`);
+  try { ichimoku = buildIchimoku(fb, fb[fb.length - 1].date, null, [], { series: "futures", inProgress: best.bars.inProgress, symbol: best.symbol, repairedDates: repaired }); }
   catch (e) { console.log(`::error title=Ichimoku futures::${e}`); }
 }
 if (!ichimoku && merged.bars.length) {

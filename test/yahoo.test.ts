@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { latestTradingDate, mergeBars, parseYahooChart, tokyoDate, tokyoNow } from "../src/yahoo";
+import { isDegenerate, latestTradingDate, mergeBars, parseYahooChart, repairDegenerate, tokyoDate, tokyoNow } from "../src/yahoo";
 
 const ts = (d: string, h = 9) => Math.floor(Date.UTC(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10), h - 9) / 1000); // JST h 時
 const json = (dates: string[], closes: number[]) => ({
@@ -49,5 +49,21 @@ describe("yahoo futures (CME)", () => {
     const b = parseYahooChart(j(open1), Date.UTC(2026, 9, 16, 3), "cme");
     expect(b.inProgress).toBe("2026-10-16");
     expect(parseYahooChart(j(open1), later, "cme").inProgress).toBeUndefined();
+  });
+});
+
+describe("repairDegenerate", () => {
+  it("rebuilds flat bars from the previous close", () => {
+    const bars = [
+      { date: "d1", open: 100, high: 102, low: 99, close: 101 },
+      { date: "d2", open: 103, high: 103, low: 103, close: 103 }, // 点
+      { date: "d3", open: 104, high: 106, low: 103, close: 105 },
+    ];
+    const r = repairDegenerate(bars);
+    expect(r.repaired).toEqual(["d2"]);
+    expect(r.bars[1]).toEqual({ date: "d2", open: 101, high: 103, low: 101, close: 103 });
+    expect(r.bars[0]).toEqual(bars[0]);
+    expect(isDegenerate(bars[1])).toBe(true);
+    expect(isDegenerate(r.bars[1])).toBe(false);
   });
 });

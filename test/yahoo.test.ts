@@ -36,3 +36,18 @@ describe("yahoo", () => {
     expect(latestTradingDate(Date.UTC(2026, 9, 16, 8, 0))).toBe("2026-10-16"); // 金曜 17:00 JST
   });
 });
+
+describe("yahoo futures (CME)", () => {
+  it("labels CME bars by Chicago trade date whichever open convention Yahoo uses", () => {
+    // 取引日 2026-10-16(金): 開始 10/15 17:00 CDT = 22:00 UTC、または 10/16 0:00 CDT = 05:00 UTC
+    const open1 = Date.UTC(2026, 9, 15, 22) / 1000, open2 = Date.UTC(2026, 9, 16, 5) / 1000;
+    const j = (ts: number) => ({ chart: { result: [{ timestamp: [ts], indicators: { quote: [{ open: [1], high: [2], low: [0.5], close: [1.5] }] } }] } });
+    const later = Date.UTC(2026, 9, 18);
+    expect(parseYahooChart(j(open1), later, "cme")[0].date).toBe("2026-10-16");
+    expect(parseYahooChart(j(open2), later, "cme")[0].date).toBe("2026-10-16");
+    // 取引中(10/16 12:00 JST = 03:00 UTC)なら inProgress
+    const b = parseYahooChart(j(open1), Date.UTC(2026, 9, 16, 3), "cme");
+    expect(b.inProgress).toBe("2026-10-16");
+    expect(parseYahooChart(j(open1), later, "cme").inProgress).toBeUndefined();
+  });
+});

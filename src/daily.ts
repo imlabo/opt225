@@ -17,8 +17,10 @@ import type { Backtest, Ichimoku } from "./ichimoku";
 /** 一目均衡表(GitHub Actions で計算して日次データに同梱) */
 export interface IchimokuPayload {
   result: Ichimoku; // 日経平均(現物)ベース
-  barsSource: "nikkei" | "nikkei+yahoo" | "nikkei+jpx"; // 最新足を Yahoo Finance で補った場合 nikkei+yahoo、JPX 終値で仮置きした場合 nikkei+jpx
+  barsSource: "nikkei" | "nikkei+yahoo" | "nikkei+jpx" | "cme-niy"; // 日経平均(公式 CSV / Yahoo 補完 / JPX 終値仮置き)または CME 日経225先物(円建て、Yahoo Finance)
+  series?: "nikkei" | "futures"; // 計算のベース。未設定は nikkei
   filled?: string[]; // Yahoo で補った日付
+  inProgress?: string; // 最後の足が取引中(ナイトセッション中など)ならその日付
   backtest: Backtest;
   prior: Record<string, number>; // バックテストで学習した一目特徴量の重み(予測モデルの事前仮説)
   chart: { date: string; high: number; low: number; open: number; close: number; tenkan?: number; kijun?: number; spanA?: number; spanB?: number }[];

@@ -9,8 +9,9 @@ import { fit, ICHI_FEATURES, ichiFeatures, PRIOR, type Features } from "./model"
  * @param spot  対象日の終値(JPX 原資産価格など)。日足に対象日が無い場合の仮置きに使う。null なら仮置きしない
  * @param filled Yahoo で補った日付(表示用)
  */
-export function buildIchimoku(bars: Bar[], tradeDate: string, spot: number | null, filled: string[] = []): IchimokuPayload {
-  let barsSource: IchimokuPayload["barsSource"] = filled.length ? "nikkei+yahoo" : "nikkei";
+export function buildIchimoku(bars: Bar[], tradeDate: string, spot: number | null, filled: string[] = [], opts: { series?: "nikkei" | "futures"; inProgress?: string } = {}): IchimokuPayload {
+  const series = opts.series ?? "nikkei";
+  let barsSource: IchimokuPayload["barsSource"] = series === "futures" ? "cme-niy" : filled.length ? "nikkei+yahoo" : "nikkei";
   bars = bars.filter((b) => b.date <= tradeDate);
   if (!bars.length || bars[bars.length - 1].date < tradeDate) {
     if (spot == null) throw new Error(`no bar for ${tradeDate}`);
@@ -37,6 +38,6 @@ export function buildIchimoku(bars: Bar[], tradeDate: string, spot: number | nul
     futureCloud.push({ date: d.toISOString().slice(0, 10), ...futureCloudAt(bars, n - 26 + k) });
   }
   const st = bt.stats;
-  console.log(`Ichimoku ${result.date} ${result.judgment} score ${result.score.toFixed(0)} wave ${result.wave} (src ${barsSource}) / backtest buy ${st.buy.hit}/${st.buy.n} sell ${st.sell.hit}/${st.sell.n} / prior ${JSON.stringify(prior)}`);
-  return { result, barsSource, filled, backtest: st, prior, chart, futureCloud };
+  console.log(`Ichimoku[${series}] ${result.date} ${result.judgment} score ${result.score.toFixed(0)} wave ${result.wave} (src ${barsSource}) / backtest buy ${st.buy.hit}/${st.buy.n} sell ${st.sell.hit}/${st.sell.n} / prior ${JSON.stringify(prior)}`);
+  return { result, barsSource, series, filled, inProgress: opts.inProgress, backtest: st, prior, chart, futureCloud };
 }

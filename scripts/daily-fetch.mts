@@ -9,7 +9,7 @@ import { OI_PAGE, OI_RE, RB_PAGE, RB_RE, buildDailyInput, decodeSjis, findLink, 
 import { computeNikkeiFg, parseCnn, parseNikkeiCsv, type CnnFg, type Point } from "../src/sentiment.ts";
 import { parseNikkeiOhlc, type Bar } from "../src/ichimoku.ts";
 import { buildIchimoku } from "../src/ichimoku-payload.ts";
-import { latestTradingDate, mergeBars, parseYahooChart, YAHOO_URLS } from "../src/yahoo.ts";
+import { latestTradingDate, mergeBars, parseYahooChart, YAHOO_FUTURES_URLS, YAHOO_URLS } from "../src/yahoo.ts";
 import type { IchimokuPayload } from "../src/daily.ts";
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36";
@@ -71,8 +71,21 @@ const merged = mergeBars(parseNikkeiOhlc(nkText), yahoo, asOf);
 const lastBar = merged.bars[merged.bars.length - 1];
 console.log(`bars: nikkei last ${parseNikkeiOhlc(nkText).at(-1)?.date ?? "-"} / yahoo last ${yahoo.at(-1)?.date ?? "-"} / filled [${merged.added.join(",")}] / asOf ${asOf}`);
 
+// 一目均衡表は日経225先物(CME 円建て NIY=F, Yahoo Finance)の日足で計算。取れなければ日経平均で代替
+let futures: ReturnType<typeof parseYahooChart> = [] as unknown as ReturnType<typeof parseYahooChart>;
+for (const u of YAHOO_FUTURES_URLS) {
+  try { futures = parseYahooChart(await (await get(u)).json(), Date.now(), "cme"); break; }
+  catch (e) { console.log(`::warning title=Yahoo futures::${u} ${e}`); }
+}
+console.log(`futures: ${futures.length} bars, last ${futures.at(-1)?.date ?? "-"} ${futures.at(-1)?.close ?? ""}${futures.inProgress ? ` (in progress ${futures.inProgress})` : ""}`);
+
 let ichimoku: IchimokuPayload | undefined;
-if (merged.bars.length) {
+const futAsOf = futures.at(-1)?.date ?? "";
+if (futures.length >= 200 && futAsOf >= asOf) {
+  try { ichimoku = buildIchimoku(futures, futAsOf, null, [], { series: "futures", inProgress: futures.inProgress }); }
+  catch (e) { console.log(`::error title=Ichimoku futures::${e}`); }
+}
+if (!ichimoku && merged.bars.length) {
   try { ichimoku = buildIchimoku(merged.bars, asOf, input?.spot ?? null, merged.added); }
   catch (e) { console.log(`::error title=Ichimoku::${e}`); }
 }
@@ -112,4 +125,4 @@ try {
 // ---- 3) 日次データ送信 ----
 if (input) await post("/admin/ingest-daily", input);
 // JPX 未公表でも一目均衡表だけは最新足で更新しておく(JPX 公表後の ingest-daily で同じ日付が上書きされる)
-else if (ichimoku && lastBar) await post("/admin/ingest-ichimoku", { tradeDate: asOf, close: lastBar.close, ichimoku });
+else if (ichimoku) await post("/admin/ingest-ichimoku", { tradeDate: ichimoku.result.date, close: ichimoku.result.close, ichimoku });

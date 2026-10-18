@@ -81,7 +81,7 @@ function chart(ic: IchiView): string {
     [...byDay].map(([inBars, us]) => vline(bars.length - 1 + inBars, us.map((u) => u.number).join("·"), "ic-time", `${md(us[0].date)}: ${us.map(basis).join(" / ")}`)).join("");
   const yt = [0, 0.25, 0.5, 0.75, 1].map((r) => min + (max - min) * r).map((v) => `<text x="2" y="${y(v) + 4}">${(v / 1000).toFixed(1)}k</text>`).join("");
   const xt = bars.filter((_, i) => i % 20 === 0).map((b) => `<text x="${x(bars.indexOf(b))}" y="${H - 8}" text-anchor="middle">${b.date.slice(5).replace("-", "/")}</text>`).join("");
-  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="一目均衡表 日足">${yt}${xt}${cloud}${candles}${line("tenkan", "ic-tenkan")}${line("kijun", "ic-kijun")}
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="一目均衡表 日足${ic.series === "futures" ? "(日経225先物)" : "(日経平均)"}">${yt}${xt}${cloud}${candles}${line("tenkan", "ic-tenkan")}${line("kijun", "ic-kijun")}
     ${chikou.length > 1 ? `<path d="M${chikou.join("L")}" class="ic-chikou"/>` : ""}
     ${t ? tline(t.N, "N") + tline(t.NT, "NT") + tline(t.V, "V") : ""}${changeDays}${wave}
     <text x="${W - 12}" y="${H - 8}" text-anchor="end"><tspan class="ic-tenkan-t">━ 転換線</tspan> <tspan class="ic-kijun-t">━ 基準線</tspan> <tspan class="ic-chikou-t">━ 遅行スパン</tspan> <tspan class="ic-wave-t">━ 3波動の読み(A→B→C)</tspan> <tspan class="ic-time-t">┆ 変化日</tspan></text></svg>`;
@@ -91,6 +91,8 @@ const DOW = ["日", "月", "火", "水", "木", "金", "土"];
 const md = (d: string) => d.slice(5).replace("-", "/");
 
 /** 支持・抵抗の候補: 上下それぞれ現値に近い順に 5 つ、根拠を列挙 */
+/** 換算表示: 先物ベースなら「現物 xx」、現物ベースなら「先物 xx」 */
+let CONV: (v: number) => string = (v) => yen(v);
 function candidatesBlock(r: IchiView["result"], basis: number): string {
   const cs = r.candidates;
   if (!cs?.length) return `<p class="small muted">候補は次回の更新から表示されます。</p>`;
@@ -104,11 +106,11 @@ function candidatesBlock(r: IchiView["result"], basis: number): string {
   const side = (s: "support" | "resistance") => pick(s).map((c) => {
     const stars = c.strength >= 3 ? "★★★" : c.strength >= 2 ? "★★" : "★";
     const range = c.hi - c.lo > 1 ? `${yen(c.lo)}〜${yen(c.hi)}` : yen(c.price);
-    return `<tr><td><strong>${range}</strong><br><small class="muted">先物 ${yen(c.price + basis)} / 現値比 ${c.price >= r.close ? "+" : "−"}${yen(Math.abs(c.price - r.close))}</small></td>
+    return `<tr><td><strong>${range}</strong><br><small class="muted">${CONV(c.price)} / 現値比 ${c.price >= r.close ? "+" : "−"}${yen(Math.abs(c.price - r.close))}</small></td>
       <td class="${c.strength >= 3 ? (s === "support" ? "up" : "down") : ""}">${stars}</td>
       <td class="wrap">${c.reasons.map((x) => `<span class="lv-kind">${KIND[x.kind] ?? x.kind}</span> ${x.label} ${yen(x.price)}`).join("<br>")}</td></tr>`;
   }).join("");
-  const head = `<thead><tr><th>水準(日経平均)</th><th>強さ</th><th>根拠</th></tr></thead>`;
+  const head = `<thead><tr><th>水準</th><th>強さ</th><th>根拠</th></tr></thead>`;
   return `<p class="small muted">現値 ${yen(r.close)} の上下 12% にある水準(五線・雲・先行スパン・遅行スパンの目安・転換点・各読みの計算値と半値・大台)を集め、±0.4% 以内で重なるものを 1 つの候補にまとめています。根拠の種類が多いほど★が多く、意識されやすい水準です。</p>
     <h5>上値の候補(抵抗)</h5><div class="table-wrap"><table>${head}<tbody>${side("resistance") || `<tr><td colspan="3" class="muted">なし</td></tr>`}</tbody></table></div>
     <h5>下値の候補(支持)</h5><div class="table-wrap"><table>${head}<tbody>${side("support") || `<tr><td colspan="3" class="muted">なし</td></tr>`}</tbody></table></div>`;
@@ -148,13 +150,18 @@ function targetsBlock(t: Targets, close: number, basis: number): string {
     ["NT", t.NT, `C ${sgn} (C − A) = ${yen(t.c.price)} ${sgn} ${yen(ac)}`],
   ];
   return `<p class="small">基準: ${pt(t.a, "A")} → ${pt(t.b, "B")} → ${pt(t.c, "C")}。A→B が第1波(${yen(ab)}円)、B→C が${up ? "押し" : "戻し"}(${yen(bc)}円 = 第1波の ${Math.round(t.retrace * 100)}%)、C からの第3波の到達目標を計算。${t.cTentative ? `C は反転が未確定の進行中の極値です。${up ? "下落" : "上昇"}が続けば C と計算値は更新されます。` : ""}</p>
-    <div class="kpis">${rows.map(([k, v, f]) => `<div class="kpi"><span>${k}計算値</span><strong>${yen(v)}</strong><small>${f}<br>先物 ${yen(v + basis)} / 現値比 ${v >= close ? "+" : "−"}${yen(Math.abs(v - close))}</small></div>`).join("")}</div>`;
+    <div class="kpis">${rows.map(([k, v, f]) => `<div class="kpi"><span>${k}計算値</span><strong>${yen(v)}</strong><small>${f}<br>${CONV(v)} / 現値比 ${v >= close ? "+" : "−"}${yen(Math.abs(v - close))}</small></div>`).join("")}</div>`;
 }
 
 export function renderIchimokuSection(ic: IchiView | undefined): string {
   if (!ic) return "";
   const r = ic.result, bt = ic.backtest, basis = ic.basis;
-  const f = (v: number) => `${yen(v)}<small class="muted"> (先物 ${yen(v + basis)})</small>`;
+  const fut = ic.series === "futures";
+  CONV = fut ? (v) => `現物換算 ${yen(v - basis)}` : (v) => `先物換算 ${yen(v + basis)}`;
+  const f = (v: number) => `${yen(v)}<small class="muted"> (${CONV(v)})</small>`;
+  const srcNote = fut
+    ? `日経225先物ベース(CME 円建て NIY=F 継続足, Yahoo Finance)${ic.inProgress ? `・${md(ic.inProgress)} の足は取引中(ナイトセッション含む暫定)` : ""}・現物換算はベーシス ${basis >= 0 ? "−" : "+"}${yen(Math.abs(basis))}円`
+    : `日経平均ベース${ic.barsSource === "nikkei+jpx" ? "(当日足は終値のみで仮計算)" : ic.barsSource === "nikkei+yahoo" ? `(${(ic.filled ?? []).map(md).join("・")} の足は Yahoo Finance で補完)` : ""}・先物換算はベーシス ${basis >= 0 ? "+" : ""}${yen(basis)}円`;
   const sig = SIGNAL_KEYS.map((k) => {
     const v = r.signal[k];
     const [name, pos, neg] = SIGNAL_LABEL[k];
@@ -167,7 +174,7 @@ export function renderIchimokuSection(ic: IchiView | undefined): string {
   const pv = r.pivots.map((p) => `${p.date.slice(5).replace("-", "/")} ${p.type === "high" ? "高値" : "安値"}${yen(p.price)}${p.confirmed ? "" : "(未確定)"}`).join(" → ");
   return `
   <section class="card">
-    <p class="eyebrow">一目均衡表(日足) ${r.date} / 日経平均ベース${ic.barsSource === "nikkei+jpx" ? "(当日足は終値のみで仮計算)" : ic.barsSource === "nikkei+yahoo" ? `(${(ic.filled ?? []).map((d) => d.slice(5).replace("-", "/")).join("・")} の足は Yahoo Finance で補完)` : ""}・先物換算はベーシス ${basis >= 0 ? "+" : ""}${yen(basis)}円</p>
+    <p class="eyebrow">一目均衡表(日足) ${r.date} / ${srcNote}</p>
     <h2>一目均衡表の判断: <span class="${r.judgment === "買い" ? "up" : r.judgment === "売り" ? "down" : ""}">${r.judgment}</span> <small class="muted">スコア ${r.score >= 0 ? "+" : ""}${Math.round(r.score)}${r.sanyaku ? ` / ${r.sanyaku}` : ""}</small></h2>
     ${chart(ic)}
     <div class="table-wrap"><table><thead><tr><th>要素</th><th>現在</th><th>過去の翌日上昇率<br><small>同じ状態だった日</small></th></tr></thead><tbody>${sig}
@@ -184,7 +191,7 @@ export function renderIchimokuSection(ic: IchiView | undefined): string {
     <h4>相場水準(支持・抵抗の候補)</h4>
     ${candidatesBlock(r, basis)}
     <details class="small"><summary>すべての水準を価格順に見る</summary>
-    <div class="table-wrap"><table><thead><tr><th>水準</th><th>日経平均(先物換算)</th><th>現値との差</th></tr></thead><tbody>${levels}</tbody></table></div></details>
+    <div class="table-wrap"><table><thead><tr><th>水準</th><th>${fut ? "先物(現物換算)" : "日経平均(先物換算)"}</th><th>現値との差</th></tr></thead><tbody>${levels}</tbody></table></div></details>
     <h4>バックテスト(${bt.from}〜${bt.to}, ${bt.n}日)</h4>
     <p class="small">一目の判断が「買い」だった日の翌日上昇率 ${pct(bt.buy.hit, bt.buy.n)}(${bt.buy.n}日)、5営業日後 ${pct(bt.buy5.hit, bt.buy5.n)} / 「売り」の翌日下落率 ${pct(bt.sell.hit, bt.sell.n)}(${bt.sell.n}日)、5営業日後 ${pct(bt.sell5.hit, bt.sell5.n)}。期間中の翌日上昇率は ${(bt.upRate * 100).toFixed(1)}%、5日後は ${(bt.upRate5 * 100).toFixed(1)}%。各要素の効き方はこの結果から学習した重みとして総合判断に反映し、日々の答え合わせで補正しています。</p>
   </section>`;

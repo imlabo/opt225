@@ -3,22 +3,35 @@ name: Daily ingest
 # JPX の日次ファイル(建玉・清算値段)を取得・解析して Worker に送る。
 # Workers の CPU 制限内では 4MB の CSV を解析できないため、解析はここで行う。
 # 取得済みの日は Worker 側で上書き(冪等)、X 投稿は 1 日 1 回のみ。
-# JPX の日次ファイルは夕方以降に順次公表されるため、未公表なら何度か再試行する。
-# JPX 未公表でも一目均衡表は Yahoo Finance の最新足で先に更新する(/admin/ingest-ichimoku)。
+#
+# スケジュール実行は「待機ループ」(scripts/wait-and-fetch.mts):
+#   大引け(15:45)直後に起動し、JPX の一覧ページを 2 分ごとに確認して、当日分の 2 ファイルがそろった時点で取り込む。
+#   起動直後に 1 回実行するので、一目均衡表は JPX の公表を待たずに更新される。
+#   GitHub のスケジュールは遅延・欠落があるため起動時刻を複数用意(実行中なら後続は待機し、取り込み済みなら即終了)。
+# 手動実行(workflow_dispatch)は既定で 1 回だけ取得する。
 on:
   schedule:
-    - cron: "15 8 * * 1-5"  # 17:15 JST(一目: Yahoo の当日足で先行更新。JPX は未公表のことが多い)
-    - cron: "30 9 * * 1-5"  # 18:30 JST
-    - cron: "0 11 * * 1-5"  # 20:00 JST(公表遅れ時の再試行)
-    - cron: "30 12 * * 1-5" # 21:30 JST(再試行)
-    - cron: "30 14 * * 1-5" # 23:30 JST(最終再試行)
+    - cron: "50 6 * * 1-5"  # 15:50 JST(本命)
+    - cron: "40 7 * * 1-5"  # 16:40 JST(予備)
+    - cron: "40 8 * * 1-5"  # 17:40 JST(予備)
+    - cron: "10 10 * * 1-5" # 19:10 JST(予備)
+    - cron: "10 12 * * 1-5" # 21:10 JST(予備)
   workflow_dispatch:
+    inputs:
+      mode:
+        description: "once = 1回だけ取得 / wait = 当日分の公表まで待って取得"
+        default: once
+        type: choice
+        options: [once, wait]
 
-concurrency: daily
+concurrency:
+  group: daily
+  cancel-in-progress: false
 
 jobs:
   ingest:
     runs-on: ubuntu-latest
+    timeout-minutes: 500
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -28,6 +41,7 @@ jobs:
         env:
           ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
           SITE_URL_VAR: ${{ vars.SITE_URL }}
+          MODE: ${{ github.event_name == 'schedule' && 'wait' || inputs.mode || 'once' }}
         run: |
           export SITE_URL="${SITE_URL_VAR:-$(grep -Eo 'SITE_URL = "[^"]+"' wrangler.toml | cut -d'"' -f2)}"
-          npx tsx scripts/daily-fetch.mts
+          if [ "$MODE" = "wait" ]; then npx tsx scripts/wait-and-fetch.mts; else npx tsx scripts/daily-fetch.mts; fi

@@ -61,7 +61,9 @@ curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" "https://<site>/admin/run"
 
 期近(SQ まで 3 日以上の最も近い限月)について、下の壁(現値以下で最大のプット建玉)、上の壁(現値以上で最大のコール建玉)、最大苦痛価格、P/C建玉比、ATM IV、SQ までの 1σ 変動幅を算出します。日次では投資部門別の内訳は公表されていません。
 
-CSV(約4MB)と Excel の解析は Workers 無料枠の CPU 時間(10ms)に収まらないため、`.github/workflows/daily.yml`(平日 17:15 / 18:30 / 20:00 / 21:30 / 23:30 JST。JPX の公表待ちで再試行)で `scripts/daily-fetch.mts` が解析し、必要な行だけを `POST /admin/ingest-daily` に送ります。Worker 側で D1 保存・分析・表示・X 投稿(1日1回)を行います。
+CSV(約4MB)と Excel の解析は Workers 無料枠の CPU 時間(10ms)に収まらないため、`.github/workflows/daily.yml` で `scripts/daily-fetch.mts` が解析し、必要な行だけを `POST /admin/ingest-daily` に送ります。
+
+**更新タイミング**: 平日 15:50 JST に `scripts/wait-and-fetch.mts` が起動し、まず 1 回実行(一目均衡表を先行更新)した後、JPX の一覧ページを 2 分ごとに確認して、当日分の建玉 xlsx と清算値段 CSV がそろった時点で即取り込みます。サイトの最新日次が当日になったら終了、23:45 JST を過ぎたら終了(祝日)。GitHub のスケジュール遅延・欠落に備えて 16:40 / 17:40 / 19:10 / 21:10 JST にも起動(取り込み済みなら即終了)。手動実行は `mode=once`(既定)で 1 回、`mode=wait` で待機ループ。Worker 側で D1 保存・分析・表示・X 投稿(1日1回)を行います。
 
 公開 API: `GET /api/daily/latest`, `GET /api/daily/history`
 

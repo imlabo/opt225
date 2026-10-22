@@ -13,6 +13,7 @@ export interface DailyStrike {
 }
 
 import type { Backtest, Ichimoku } from "./ichimoku";
+import { computeGreeks, type Greeks } from "./greeks";
 
 /** 一目均衡表(GitHub Actions で計算して日次データに同梱) */
 export interface IchimokuPayload {
@@ -58,6 +59,7 @@ export interface DailyAnalysis {
   topCallAdds: { strike: number; chg: number }[];
   prev?: { tradeDate: string; pcr: number; atmIv: number | null; spot: number };
   seller?: SellerPnl;
+  greeks?: Greeks; // 売り手のデルタヘッジ・ガンマ・セータ(全限月)
   ichimoku?: IchimokuPayload & { basis: number }; // basis = 先物 − 現物(先物換算用)
   comment: string;
 }
@@ -168,6 +170,7 @@ export function analyzeDaily(d: DailyInput, prev?: DailyAnalysis): DailyAnalysis
     callWall: callWall && { strike: callWall.strike, oi: callWall.callOi! },
     maxPain, topPutAdds: top("putChg"), topCallAdds: top("callChg"),
     seller: sellerPnl(rows, d.spot),
+    greeks: computeGreeks(d.strikes, d.months, d.spot, front.month, atmIv),
     ichimoku: d.ichimoku && { ...d.ichimoku, basis: fut ? fut.price - d.spot : 0 },
     prev: prev && { tradeDate: prev.tradeDate, pcr: prev.pcr, atmIv: prev.atmIv, spot: prev.spot },
     comment: "",
@@ -191,6 +194,10 @@ export function dailyComment(a: DailyAnalysis): string {
     if (Math.abs(d) >= 0.02) parts.push(`期近P/C建玉比は${a.pcr.toFixed(2)}(前日比${d > 0 ? "+" : ""}${d.toFixed(2)})で${d > 0 ? "プット(下落ヘッジ)" : "コール"}側の積み増し。`);
   }
   if (a.seller?.putBreakeven) parts.push(`プット売り手全体はSQ時に${yen(a.seller.putBreakeven)}円を割ると損失に転じる計算。`);
+  if (a.greeks) {
+    const g = a.greeks;
+    parts.push(`売り手の推定ヘッジは先物${g.hedge >= 0 ? "買い" : "売り"}${yen(Math.abs(g.hedge))}枚(ラージ換算)で、日経平均が100円動くごとに約${yen(g.gamma100)}枚を同じ方向に売買する計算(ショートガンマ)。売り手が受け取る時間価値は1日約${(g.thetaYen / 1e8).toFixed(1)}億円。`);
+  }
   if (a.atmIv && a.expectedMove) parts.push(`ATM IV ${a.atmIv.toFixed(1)}%から、SQまでの1σ変動幅は±${yen(a.expectedMove)}円。`);
   return parts.join("");
 }

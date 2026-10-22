@@ -80,6 +80,46 @@ function sellerSection(a: DailyAnalysis): string {
     <p class="muted small">現時点の清算価格でオプションを売ったとみなし、SQ時の日経平均ごとに売り手全体の損益を計算(1枚=指数×1,000円)。損益分岐を割り込むと売り手のヘッジ(先物売り・プット買い戻し)が出やすく、下げが加速しやすい価格帯の目安になります。損失が大きい範囲はグラフ下端で省略しています。誰が売り手かの内訳は週次の投資部門別推定を参照。</p>`;
 }
 
+/** 売り手のヘッジ先物(線)とガンマ(棒)を価格ごとに */
+function greeksChart(a: DailyAnalysis): string {
+  const g = a.greeks!;
+  const pts = g.profile;
+  if (pts.length < 3) return "";
+  const W = 720, H = 240, P = 44;
+  const hs = pts.map((p) => p.hedge), hmax = Math.max(...hs.map(Math.abs), 1);
+  const gmax = Math.max(...pts.map((p) => p.gamma100), 1);
+  const x = (v: number) => P + ((v - pts[0].price) / (pts[pts.length - 1].price - pts[0].price)) * (W - 2 * P);
+  const yh = (v: number) => 14 + ((hmax - v) / (2 * hmax)) * (H - 48);
+  const yg = (v: number) => H - 34 - (v / gmax) * (H - 70) * 0.9;
+  const bw = Math.max(2, ((W - 2 * P) / pts.length) * 0.6);
+  const bars = pts.map((p) => `<rect x="${(x(p.price) - bw / 2).toFixed(1)}" y="${yg(p.gamma100).toFixed(1)}" width="${bw.toFixed(1)}" height="${(H - 34 - yg(p.gamma100)).toFixed(1)}" class="gx-bar"><title>${yen(p.price)}: ガンマ 100円あたり ${yen(p.gamma100)}枚 / ヘッジ ${signed(p.hedge)}枚</title></rect>`).join("");
+  const line = pts.map((p, i) => `${i ? "L" : "M"}${x(p.price).toFixed(1)},${yh(p.hedge).toFixed(1)}`).join("");
+  const ticks = pts.filter((_, i) => i % Math.ceil(pts.length / 7) === 0).map((p) => `<text x="${x(p.price)}" y="${H - 18}" text-anchor="middle">${(p.price / 1000).toFixed(1)}k</text>`).join("");
+  const sp = a.spot >= pts[0].price && a.spot <= pts[pts.length - 1].price ? `<line x1="${x(a.spot)}" x2="${x(a.spot)}" y1="10" y2="${H - 34}" class="spot"/><text x="${x(a.spot) + 4}" y="20" class="spot-t">現値 ${yen(a.spot)}</text>` : "";
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="売り手のヘッジとガンマ">
+    ${bars}<line x1="${P}" x2="${W - P}" y1="${yh(0)}" y2="${yh(0)}" class="axis"/><text x="2" y="${yh(0) + 4}">0枚</text>
+    <text x="2" y="${yh(hmax) + 10}">+${yen(hmax)}</text><text x="2" y="${yh(-hmax)}">−${yen(hmax)}</text>
+    <path d="${line}" class="gx-line"/>${sp}${ticks}
+    <text x="${W - P}" y="${H - 2}" text-anchor="end"><tspan class="gx-line-t">━ 売り手のヘッジ先物(枚)</tspan>　<tspan class="gx-bar-t">■ ガンマ(100円あたりの売買枚数)</tspan></text></svg>`;
+}
+
+function greeksSection(a: DailyAnalysis): string {
+  const g = a.greeks;
+  if (!g) return "";
+  const kpi = (label: string, value: string, sub = "") => `<div class="kpi"><span>${label}</span><strong>${value}</strong>${sub ? `<small>${sub}</small>` : ""}</div>`;
+  const mm = (m: string) => `${Number(m.slice(4))}月`;
+  const okuD = (v: number) => `${(v / 1e8).toFixed(1)}億円`;
+  return `<h4>デルタヘッジ・ガンマ・セータ(売り手全体の推定, ${g.months.map(mm).join("・")}限)</h4>
+    <div class="kpis">
+      ${kpi("デルタヘッジ(先物)", `${g.hedge >= 0 ? "買い" : "売り"} ${yen(Math.abs(g.hedge))}枚`, `ラージ換算(ミニ ${yen(Math.abs(g.hedge) * 10)}枚)/ コール売りのヘッジ 買い${yen(g.callHedge)} ・ プット売りのヘッジ 売り${yen(-g.putHedge)}`)}
+      ${kpi("ガンマ", `100円で ${yen(g.gamma100)}枚`, `日経平均が100円上がると先物を約${yen(g.gamma100)}枚買い増し、下がると売る(1%で約${yen(g.gamma1pct)}枚)`)}
+      ${kpi("セータ", `1日 ${okuD(g.thetaYen)}`, `売り手が受け取る時間価値(暦日あたり)。うち期近 ${okuD(g.thetaFrontYen)}(SQまで${g.frontDays}日)`)}
+    </div>
+    ${greeksChart(a)}
+    <p class="small">ガンマが集中する行使価格: ${g.topGamma.map((t) => `${yen(t.strike)}(${mm(t.month)}限, 100円あたり${yen(t.gamma100)}枚)`).join("、")}。この近辺では売り手のヘッジ売買が大きくなり、値動きが増幅されやすくなります(ショートガンマ)。</p>
+    <p class="muted small">建玉はすべて売り手がショートし、売り手だけが先物でデルタヘッジすると仮定した推定です(買い手のヘッジやヘッジしない売り手は考慮していません)。Black-Scholes(金利・配当0)で、IVは JPX 清算値段の行使価格別ボラティリティ、残日数は暦日。グラフは価格だけが動いた場合(IV・残日数は現在のまま)のヘッジ量とガンマです。オプション1枚 = 指数×1,000円 = 先物ラージ1枚相当。</p>`;
+}
+
 function trend(history: DailyAnalysis[]): string {
   const rows = history.slice(-10).reverse();
   if (rows.length < 2) return "";
@@ -110,6 +150,7 @@ export function renderDailySection(a: DailyAnalysis | undefined, history: DailyA
     <p class="comment">${esc(a.comment)}</p>
     <h4>行使価格別 建玉(${esc(m)}, 500円刻み)</h4>
     ${oiChart(a, strikes)}
+    ${greeksSection(a)}
     ${sellerSection(a)}
     <p class="muted small">建玉が当日増えた行使価格: プット ${a.topPutAdds.map((t) => `${yen(t.strike)}(+${yen(t.chg)})`).join("、") || "—"} / コール ${a.topCallAdds.map((t) => `${yen(t.strike)}(+${yen(t.chg)})`).join("、") || "—"}</p>
     ${trend(history)}
@@ -121,5 +162,6 @@ export const DAILY_CSS = `
 .kpi small{display:block;font-size:12px;color:var(--muted)}.small{font-size:12px}
 .sp-put{fill:none;stroke:var(--down);stroke-width:2}.sp-call{fill:none;stroke:var(--up);stroke-width:2}
 svg tspan.sp-put-t{fill:var(--down)}svg tspan.sp-call-t{fill:var(--up)}.be{stroke:#7c3aed;stroke-dasharray:4 3}.be-t{fill:#7c3aed!important;font-size:10px}
+.gx-bar{fill:#d946ef44}.gx-line{fill:none;stroke:#0ea5e9;stroke-width:2}svg tspan.gx-line-t{fill:#0ea5e9}svg tspan.gx-bar-t{fill:#d946ef}
 .spot{stroke:var(--fg);stroke-dasharray:3 3}.spot-t{fill:var(--fg)!important}.pain{stroke:#b7791f;stroke-dasharray:6 3}.pain-t{fill:#b7791f!important}
 `;

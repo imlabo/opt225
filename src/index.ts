@@ -8,6 +8,7 @@ interface IchimokuLatest { tradeDate: string; close: number; ichimoku: IchimokuP
 import { decodeJpx, parseWeeklyCsv } from "./jpx";
 import { analyzeAndPost, ingestDaily, ingestManual, rebuildSqueeze, runPipeline } from "./pipeline";
 import type { SqueezeHist } from "./squeeze";
+import { DEFAULT_CONFIG, type ModelConfig, type TuningReport } from "./tuning";
 import { renderPage } from "./page";
 import { INVESTORS, type Env, type WeekData } from "./types";
 
@@ -22,7 +23,10 @@ app.get("/", async (c) => {
   const dl = dailyHistory[dailyHistory.length - 1];
   const strikes = dl ? await loadDailyStrikes(c.env, dl.tradeDate, dl.front.month) : [];
   // JPX 未公表の日でも一目均衡表は最新足(Yahoo 補完)で更新されている場合がある
-  const [latestIchi, squeezeHist] = await Promise.all([loadMeta<IchimokuLatest>(c.env, "ichimoku_latest"), loadMeta<SqueezeHist[]>(c.env, "squeeze_hist")]);
+  const [latestIchi, squeezeHist, modelConfig, tuningLog] = await Promise.all([
+    loadMeta<IchimokuLatest>(c.env, "ichimoku_latest"), loadMeta<SqueezeHist[]>(c.env, "squeeze_hist"),
+    loadMeta<ModelConfig>(c.env, "model_config"), loadMeta<TuningReport[]>(c.env, "model_tuning_log"),
+  ]);
   const ichimoku = latestIchi && (!dl?.ichimoku || latestIchi.tradeDate > dl.ichimoku.result.date)
     ? { ...latestIchi.ichimoku, basis: dl?.ichimoku?.basis ?? 0 }
     : dl?.ichimoku;
@@ -30,7 +34,7 @@ app.get("/", async (c) => {
   return c.html(renderPage({
     latest: history[history.length - 1], history, week: weeks[0], siteUrl: c.env.SITE_URL,
     daily: { latest: dl, history: dailyHistory, strikes, squeezeHist: squeezeHist ?? [] }, ichimoku,
-    model: { prediction, recent, logs },
+    model: { prediction, recent, logs, config: modelConfig ?? DEFAULT_CONFIG, tuning: tuningLog ?? [] },
     sentiment,
   }));
 });
@@ -45,6 +49,10 @@ app.get("/api/daily/latest", async (c) => {
   return a ? c.json(a) : c.json({ error: "no data" }, 404);
 });
 app.get("/api/daily/history", async (c) => c.json(await loadDailyAnalyses(c.env, 250)));
+app.get("/api/model/config", async (c) => {
+  const [config, log] = await Promise.all([loadMeta<ModelConfig>(c.env, "model_config"), loadMeta<TuningReport[]>(c.env, "model_tuning_log")]);
+  return c.json({ config: config ?? DEFAULT_CONFIG, log: log ?? [] });
+});
 app.get("/api/squeeze", async (c) => c.json((await loadMeta<SqueezeHist[]>(c.env, "squeeze_hist")) ?? []));
 app.get("/api/sentiment", async (c) => c.json(await loadSentiment(c.env, Number(c.req.query("days") ?? 365))));
 app.get("/api/prediction/latest", async (c) => c.json(await loadLatestPrediction(c.env)));
@@ -116,6 +124,18 @@ app.post("/admin/ingest-ichimoku", async (c) => {
   if (b.ichimoku.prior) await saveMeta(c.env, "ichimoku_prior", b.ichimoku.prior);
   const updated = await updateDailyIchimoku(c.env, b.tradeDate, b.ichimoku);
   return c.json({ tradeDate: b.tradeDate, judgment: b.ichimoku.result.judgment, score: b.ichimoku.result.score, barsSource: b.ichimoku.barsSource, filled: b.ichimoku.filled ?? [], dailyUpdated: updated });
+});
+
+/** 予測モデルの自動改善の結果を保存(GitHub Actions の scripts/daily-fetch.mts から、日次データ投入の直前に) */
+app.post("/admin/model-config", async (c) => {
+  const b = await c.req.json<{ config: ModelConfig; report: TuningReport }>();
+  if (!b.config || !(b.config.ridge > 0) || !(b.config.threshold > 0.5 && b.config.threshold < 1) || !Array.isArray(b.config.off)) return c.json({ error: "invalid body" }, 400);
+  await saveMeta(c.env, "model_config", b.config);
+  if (b.report) {
+    const log = (await loadMeta<TuningReport[]>(c.env, "model_tuning_log")) ?? [];
+    await saveMeta(c.env, "model_tuning_log", [...log.filter((r) => r.date !== b.report.date), b.report].sort((x, y) => x.date.localeCompare(y.date)).slice(-120));
+  }
+  return c.json({ ok: true, changed: b.report?.changed ?? false, note: b.report?.note });
 });
 
 /** 踏み上げ恐怖指数の履歴を保存済み日次データから作り直す(デプロイ時に自動実行) */

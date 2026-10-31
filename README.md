@@ -75,7 +75,9 @@ CSV(約4MB)と Excel の解析は Workers 無料枠の CPU 時間(10ms)に収ま
 3. **補正**: 検証済み全件で重みを毎日再フィット。事前仮説 `PRIOR` へのリッジ正則化(`RIDGE`)付きのため、件数が少ないうちは仮説どおり、増えるほど実績に合わせて修正。予想レンジ係数 `k` は実績の 68% 点に較正。重みと成績の推移は `model_log` に保存。
 4. **成績**: 方向的中率(明示した件のみ)、レンジ内率、ブライアスコア。成績は各予測をその時点のモデルで出したもの(後知恵なし)。
 
-公開 API: `GET /api/prediction/latest`, `GET /api/prediction/track-record`
+5. **自動改善(毎日)**: 日次データの取り込み直前に GitHub Actions(`src/tuning.ts`)が、検証済みの判断をウォークフォワード(その日より前のデータだけで学習→その日を予測)で再現し、リッジの強さ(1/4/16/64)・特徴量グループ(オプション建玉・週次フロー・勢い・Fear & Greed・一目・踏み上げ恐怖指数)の使用/不使用・方向を明示するしきい値(52〜60%)を比べる。対数損失が今の設定より 0.004 以上良い候補があれば切り替え(検証済み 10 件未満は据え置き、しきい値は 20 件以上で実績の損益から選ぶ)。結果は `POST /admin/model-config` で保存し、その日の予測から反映。見直しの記録・候補の成績・グループの貢献・特徴量単体の当たり方をサイトに表示。
+
+公開 API: `GET /api/prediction/latest`, `GET /api/prediction/track-record`, `GET /api/model/config`(現在の設定と見直しの記録)
 
 ## 市場心理: Fear & Greed (`src/sentiment.ts`)
 - **CNN Fear & Greed(米国株)**: CNN のサイト表示用データ(`production.dataviz.cnn.io/index/fearandgreed/graphdata`)を取得して表示。公式 API ではないため、仕様変更で取得できなくなる可能性があります。出典表記とリンクを掲載。

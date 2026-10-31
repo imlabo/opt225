@@ -10,7 +10,8 @@
 import type { DailyAnalysis } from "./daily";
 
 export const ICHI_FEATURES = ["ichiTk", "ichiCloud", "ichiChikou", "ichiFuture", "ichiSlope", "ichiWave", "ichiTime"] as const;
-export const FEATURES = ["pain", "dPcr", "dIv", "skew", "wallPos", "basis", "weekly", "momentum", "fgNikkei", "fgCnn", ...ICHI_FEATURES] as const;
+export const SQ_FEATURES = ["sqPut", "sqCall"] as const;
+export const FEATURES = ["pain", "dPcr", "dIv", "skew", "wallPos", "basis", "weekly", "momentum", "fgNikkei", "fgCnn", ...ICHI_FEATURES, ...SQ_FEATURES] as const;
 export type FeatureName = (typeof FEATURES)[number];
 export type Features = Record<FeatureName, number>;
 
@@ -32,6 +33,8 @@ export const FEATURE_LABEL: Record<FeatureName, string> = {
   ichiSlope: "一目: 基準線の向き",
   ichiWave: "一目: 波動(N波動)",
   ichiTime: "一目: 時間論(変化日)",
+  sqPut: "踏み上げ恐怖: プット売り手",
+  sqCall: "踏み上げ恐怖: コール売り手",
 };
 
 /** 事前仮説(学習前の重み)。切片 + 各特徴量 */
@@ -49,6 +52,8 @@ export const PRIOR: { bias: number } & Features = {
   fgCnn: 0,
   // 一目均衡表の事前重みは 0。過去データのバックテストで学習した重みがあればそれを事前仮説に使う
   ichiTk: 0, ichiCloud: 0, ichiChikou: 0, ichiFuture: 0, ichiSlope: 0, ichiWave: 0, ichiTime: 0,
+  // 踏み上げ恐怖指数: 順張り(投げが下げを加速)か逆張り(恐怖のピークで反転)かは実績で判断
+  sqPut: 0, sqCall: 0,
 };
 export const RIDGE = 4; // 事前仮説への引き戻しの強さ
 export const TRADING_DAYS = 245;
@@ -88,7 +93,13 @@ export function features(a: DailyAnalysis, weeklyScore: number | null, fg: Senti
     fgNikkei: clip(fg.nikkei != null ? (fg.nikkei - 50) / 25 : 0),
     fgCnn: clip(fg.cnn != null ? (fg.cnn - 50) / 25 : 0),
     ...ichiFeatures(ichi),
+    ...sqFeatures(a.squeeze ? { put: a.squeeze.put.index, call: a.squeeze.call.index } : null),
   };
+}
+
+/** 踏み上げ恐怖指数(0〜100)→ 特徴量(50 = 0、25 ポイントで ±1) */
+export function sqFeatures(sq: { put: number; call: number } | null): Pick<Features, (typeof SQ_FEATURES)[number]> {
+  return { sqPut: sq ? clip((sq.put - 50) / 25) : 0, sqCall: sq ? clip((sq.call - 50) / 25) : 0 };
 }
 
 export type Weights = typeof PRIOR;
@@ -162,14 +173,16 @@ export interface Prediction {
   x: Features;
   contributions: { feature: FeatureName; label: string; value: number }[];
   modelN: number; // 学習に使った検証済みサンプル数
+  threshold?: number; // 方向を明示する上昇確率のしきい値
+  config?: string; // 使ったモデル設定の説明
 }
 
-export function makePrediction(a: DailyAnalysis, x: Features, w: Weights, k: number, modelN: number): Prediction {
+export function makePrediction(a: DailyAnalysis, x: Features, w: Weights, k: number, modelN: number, threshold = CALL_THRESHOLD): Prediction {
   const pUp = predictProb(w, x);
   const sigma1d = oneDaySigma(a);
   return {
     tradeDate: a.tradeDate, spot: a.spot, pUp,
-    call: pUp >= CALL_THRESHOLD ? "up" : pUp <= 1 - CALL_THRESHOLD ? "down" : "flat",
+    call: pUp >= threshold ? "up" : pUp <= 1 - threshold ? "down" : "flat",
     rangeLo: a.spot - k * sigma1d, rangeHi: a.spot + k * sigma1d, sigma1d, k, x,
     contributions: FEATURES.map((f) => ({ feature: f, label: FEATURE_LABEL[f], value: (w[f] ?? 0) * (x[f] ?? 0) }))
       .sort((p, q) => Math.abs(q.value) - Math.abs(p.value)),

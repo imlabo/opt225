@@ -1,6 +1,7 @@
 import { analyzeDaily, type DailyAnalysis, type DailyInput } from "./daily";
 import { evaluatePending, loadAnalyses, loadMeta, saveMeta, loadSentiment, loadDailyAnalyses, loadDailyStrikes, loadEvaluated, logDailyPost, saveDaily, saveModelLog, savePrediction, wasDailyPosted } from "./db";
-import { calibrateK, features, fit, ichiMetrics, makePrediction, metrics, PRIOR, type Prediction } from "./model";
+import { calibrateK, features, fit, ichiMetrics, makePrediction, metrics, PRIOR, sqFeatures, type Features, type Prediction } from "./model";
+import { configLabel, DEFAULT_CONFIG, mask, type ModelConfig } from "./tuning";
 import { composeDailyTweet } from "./x";
 import { analyze } from "./analysis";
 import { hasWeek, loadHistory, logPost, saveAnalysis, saveWeek, wasPosted } from "./db";
@@ -125,7 +126,16 @@ export async function learnAndPredict(env: Env, a: DailyAnalysis) {
   const ichiPrior = a.ichimoku?.prior ?? (await loadMeta<Record<string, number>>(env, "ichimoku_prior")) ?? {};
   if (a.ichimoku) await saveMeta(env, "ichimoku_prior", a.ichimoku.prior);
   const prior = { ...PRIOR, ...ichiPrior };
-  const weights = fit(ev.map((e) => ({ x: e.x, y: e.actualSpot > e.spot ? 1 : 0 })), prior);
+  // 自動改善で選ばれた設定(リッジ・使う特徴量・しきい値)。GitHub Actions が毎日見直す(src/tuning.ts)
+  const cfg = (await loadMeta<ModelConfig>(env, "model_config")) ?? DEFAULT_CONFIG;
+  // 踏み上げ恐怖指数の導入前に出した予測にも、履歴から特徴量を補う
+  const sqHist = new Map(((await loadMeta<SqueezeHist[]>(env, "squeeze_hist")) ?? []).map((h) => [h.date, h]));
+  const xOf = (e: { tradeDate: string; x: Features }) => {
+    const h = sqHist.get(e.tradeDate);
+    const x = { ...e.x, ...(e.x.sqPut == null && h ? sqFeatures({ put: h.putIndex, call: h.callIndex }) : {}) } as Features;
+    return mask(x, cfg.off);
+  };
+  const weights = fit(ev.map((e) => ({ x: xOf(e), y: e.actualSpot > e.spot ? 1 : 0 })), prior, cfg.ridge);
   const k = calibrateK(ev.map((e) => Math.abs(e.actualSpot - e.spot) / e.sigma1d));
   const m = { ...metrics(ev), ichi: ichiMetrics(ev) }; // 各予測を出した時点の成績(後知恵なし)
   await saveModelLog(env, { tradeDate: a.tradeDate, n: ev.length, weights, prior, k, metrics: m });
@@ -134,7 +144,9 @@ export async function learnAndPredict(env: Env, a: DailyAnalysis) {
   const fg = await loadSentiment(env, 7, a.tradeDate);
   const fgSet = { nikkei: fg.nikkei?.score ?? null, cnn: fg.cnnHistory[fg.cnnHistory.length - 1]?.score ?? null };
   const ichiIn = a.ichimoku ? { signal: a.ichimoku.result.signal, timeHit: a.ichimoku.result.time.hits.length > 0 } : null;
-  const prediction: Prediction = makePrediction(a, features(a, weekly?.score ?? null, fgSet, ichiIn), weights, k, ev.length);
+  const prediction: Prediction = makePrediction(a, mask(features(a, weekly?.score ?? null, fgSet, ichiIn), cfg.off), weights, k, ev.length, cfg.threshold);
+  prediction.threshold = cfg.threshold;
+  prediction.config = configLabel(cfg);
   await savePrediction(env, prediction);
 
   const last = ev[ev.length - 1];

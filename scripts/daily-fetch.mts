@@ -11,6 +11,9 @@ import { parseNikkeiOhlc, type Bar } from "../src/ichimoku.ts";
 import { buildIchimoku } from "../src/ichimoku-payload.ts";
 import { isDegenerate, latestTradingDate, mergeBars, parseYahooChart, repairDegenerate, YAHOO_FUTURES_ALT_URLS, YAHOO_FUTURES_URLS, YAHOO_URLS } from "../src/yahoo.ts";
 import type { IchimokuPayload } from "../src/daily.ts";
+import { sqFeatures, type Features } from "../src/model.ts";
+import type { SqueezeHist } from "../src/squeeze.ts";
+import { DEFAULT_CONFIG, priorWith, tune, type ModelConfig, type Sample } from "../src/tuning.ts";
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36";
 const NK_CSV = "https://indexes.nikkei.co.jp/nkave/historical/nikkei_stock_average_daily_jp.csv";
@@ -133,6 +136,29 @@ try {
   await post("/admin/ingest-sentiment", { nikkei, cnn });
 } catch (e) {
   console.log(`::error title=Sentiment::${e}`);
+}
+
+// ---- 2.5) 予測モデルの自動改善(答え合わせの結果から設定を見直し、日次データ送信の前に反映) ----
+if (input && site) {
+  try {
+    const tr = (await (await fetch(`${site}/api/prediction/track-record`)).json()) as { evaluated: { tradeDate: string; spot: number; actualSpot: number; x: Features }[] };
+    const latest = (await (await fetch(`${site}/api/prediction/latest`)).json()) as { tradeDate?: string; spot?: number; x?: Features } | null;
+    const cur = (await (await fetch(`${site}/api/model/config`)).json()) as { config: ModelConfig };
+    const sqHist = new Map(((await (await fetch(`${site}/api/squeeze`)).json()) as SqueezeHist[]).map((h) => [h.date, h]));
+    const rows = [...tr.evaluated];
+    // 前営業日の予測は今日の終値で答え合わせしてから使う(Worker 側の答え合わせより先に見直すため)
+    if (latest?.tradeDate && latest.x && latest.spot && latest.tradeDate < input.tradeDate && !rows.some((r) => r.tradeDate === latest.tradeDate))
+      rows.push({ tradeDate: latest.tradeDate, spot: latest.spot, actualSpot: input.spot, x: latest.x });
+    const samples: Sample[] = rows.sort((a, b) => a.tradeDate.localeCompare(b.tradeDate)).map((r) => {
+      const h = sqHist.get(r.tradeDate);
+      const x = { ...r.x, ...(r.x.sqPut == null && h ? sqFeatures({ put: h.putIndex, call: h.callIndex }) : {}) } as Features;
+      return { date: r.tradeDate, x, y: r.actualSpot > r.spot ? 1 : 0, ret: r.actualSpot / r.spot - 1 };
+    });
+    const t0 = Date.now();
+    const { config, report } = tune(samples, priorWith(ichimoku?.prior), cur.config ?? DEFAULT_CONFIG, input.tradeDate);
+    console.log(`tuning: ${samples.length} samples, ${Date.now() - t0}ms — ${report.note}`);
+    await post("/admin/model-config", { config, report });
+  } catch (e) { console.log(`::warning title=Tuning::${e}`); }
 }
 
 // ---- 3) 日次データ送信 ----

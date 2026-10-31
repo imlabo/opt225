@@ -30,8 +30,11 @@ export interface ModelConfig {
 }
 export const DEFAULT_CONFIG: ModelConfig = { ridge: RIDGE, off: [], threshold: CALL_THRESHOLD };
 
-export const configLabel = (c: Pick<ModelConfig, "ridge" | "off">) =>
-  `リッジ${c.ridge}${c.off.length ? `・${c.off.map((g) => GROUPS[g].label.replace(/\(.*\)/, "")).join("/")}を除外` : "・全特徴量"}`;
+/** 表示用のラベル(一目均衡表は画面に出さないため除外の表記からも省く) */
+export const configLabel = (c: Pick<ModelConfig, "ridge" | "off">) => {
+  const off = c.off.filter((g) => g !== "ichimoku");
+  return `リッジ${c.ridge}${off.length ? `・${off.map((g) => GROUPS[g].label.replace(/\(.*\)/, "")).join("/")}を除外` : "・全特徴量"}`;
+};
 const sameModel = (a: Pick<ModelConfig, "ridge" | "off">, b: Pick<ModelConfig, "ridge" | "off">) =>
   a.ridge === b.ridge && [...a.off].sort().join() === [...b.off].sort().join();
 

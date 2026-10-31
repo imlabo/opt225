@@ -13,11 +13,11 @@ function tuningBlock(cfg: ModelConfig | undefined, log: TuningReport[]): string 
   const changes = log.filter((r) => r.changed).slice(-8).reverse();
   const md = (d: string) => d.slice(5).replace("-", "/");
   const ll = (v: number) => v.toFixed(4);
-  const head = `<p class="small">現在の設定: <b>${configLabel(cfg)}・しきい値 ${Math.round(cfg.threshold * 100)}%</b>${cfg.since ? `(${md(cfg.since)}から)` : "(初期設定)"}。使用中の特徴量: ${GROUP_KEYS.filter((g) => !cfg.off.includes(g)).map((g) => GROUPS[g].label.replace(/\(.*\)/, "")).join("・")}。</p>`;
+  const head = `<p class="small">現在の設定: <b>${configLabel(cfg)}・しきい値 ${Math.round(cfg.threshold * 100)}%</b>${cfg.since ? `(${md(cfg.since)}から)` : "(初期設定)"}。使用中の特徴量: ${GROUP_KEYS.filter((g) => !cfg.off.includes(g) && g !== "ichimoku").map((g) => GROUPS[g].label.replace(/\(.*\)/, "")).join("・")}。</p>`;
   if (!last) return `${head}<p class="small muted">答え合わせが始まると、毎日ここに見直しの結果が載ります。</p>`;
   const cands = last.candidates.map((c, i) => `<tr><td>${i + 1}</td><td>${c.label}</td><td>${ll(c.logloss)}</td><td>${c.brier.toFixed(3)}</td><td>${c.hitRate == null ? "—" : `${Math.round(c.hitRate * 100)}%(${c.calls}件)`}</td></tr>`).join("");
-  const groups = [...last.groups].sort((a, b) => b.delta - a.delta).map((g) => `<tr><td>${g.label}</td><td class="${g.delta > 0.001 ? "up" : g.delta < -0.001 ? "down" : ""}">${g.delta >= 0 ? "+" : ""}${g.delta.toFixed(4)}</td><td>${g.delta > 0.001 ? "役に立っている" : g.delta < -0.001 ? "今は逆効果" : "ほぼ影響なし"}${cfg.off.includes(g.group) ? "(除外中)" : ""}</td></tr>`).join("");
-  const feats = last.features.filter((f) => f.n >= 3).sort((a, b) => Math.abs((b.hitRate ?? 0.5) - 0.5) - Math.abs((a.hitRate ?? 0.5) - 0.5)).slice(0, 8)
+  const groups = [...last.groups].filter((g) => g.group !== "ichimoku").sort((a, b) => b.delta - a.delta).map((g) => `<tr><td>${g.label}</td><td class="${g.delta > 0.001 ? "up" : g.delta < -0.001 ? "down" : ""}">${g.delta >= 0 ? "+" : ""}${g.delta.toFixed(4)}</td><td>${g.delta > 0.001 ? "役に立っている" : g.delta < -0.001 ? "今は逆効果" : "ほぼ影響なし"}${cfg.off.includes(g.group) ? "(除外中)" : ""}</td></tr>`).join("");
+  const feats = last.features.filter((f) => f.n >= 3 && !f.feature.startsWith("ichi")).sort((a, b) => Math.abs((b.hitRate ?? 0.5) - 0.5) - Math.abs((a.hitRate ?? 0.5) - 0.5)).slice(0, 8)
     .map((f) => `<tr><td>${f.label}</td><td>${f.hitRate == null ? "—" : `${Math.round(f.hitRate * 100)}%`}</td><td>${f.n}件</td></tr>`).join("");
   const ths = last.thresholds.map((t) => `<tr><td>${Math.round(t.threshold * 100)}%</td><td>${t.calls}件</td><td>${t.hitRate == null ? "—" : `${Math.round(t.hitRate * 100)}%`}</td><td>${(t.pnlPerDay * 100).toFixed(3)}%</td></tr>`).join("");
   return `${head}
@@ -45,7 +45,7 @@ export function renderModelSection(p: Prediction | null, recent: PredictionRow[]
     return `<tr><td>${e.tradeDate.slice(5).replace("-", "/")}</td><td>${callLabel(e.call)} ${Math.round(e.pUp * 100)}%</td><td class="${up ? "up" : "down"}">${yen(e.actualSpot)} (${up ? "+" : ""}${yen(e.actualSpot - e.spot)})</td><td>${dirHit}</td><td>${inRange}</td></tr>`;
   }).join("");
   const prior = m?.prior ?? PRIOR;
-  const weightsRows = FEATURES.map((f) => {
+  const weightsRows = FEATURES.filter((f) => !f.startsWith("ichi")).map((f) => {
     const cur = w[f] ?? 0, pri = prior[f] ?? 0, d = cur - pri;
     return `<tr><td>${FEATURE_LABEL[f]}</td><td>${pri.toFixed(2)}</td><td>${cur.toFixed(2)}</td><td class="${d > 0.005 ? "up" : d < -0.005 ? "down" : ""}">${d >= 0 ? "+" : ""}${d.toFixed(2)}</td></tr>`;
   }).join("");

@@ -118,6 +118,12 @@ function greeksSection(a: DailyAnalysis): string {
     </div>
     ${greeksChart(a)}
     <p class="small">ガンマが集中する行使価格: ${g.topGamma.map((t) => `${yen(t.strike)}(${mm(t.month)}限, 100円あたり${yen(t.gamma100)}枚)`).join("、")}。この近辺では売り手のヘッジ売買が大きくなり、値動きが増幅されやすくなります(ショートガンマ)。</p>
+    <details class="explain" open><summary>数字の読み方</summary><dl>
+      <dt>デルタヘッジ(先物)</dt><dd><p>オプションの売り手が、価格変動の損失を打ち消すために持っているはずの先物の量。コールを売った人は上昇で損をするので先物を買い、プットを売った人は下落で損をするので先物を売ってヘッジします。その合計をラージ先物の枚数で表しています(ミニは10倍)。</p><p>「買い」なら売り手全体が先物を買い越している、「売り」なら売り越している状態。今日は${g.hedge >= 0 ? "買い" : "売り"} ${yen(Math.abs(g.hedge))}枚で、コール側の買い ${yen(g.callHedge)}枚とプット側の売り ${yen(-g.putHedge)}枚の差し引きです。</p></dd>
+      <dt>ガンマ</dt><dd><p>日経平均が動いたときに、売り手がヘッジを保つために追加で売買しなければならない先物の量。売り手は「ショートガンマ」なので、上がれば買い増し、下がれば売り増しと、値動きと同じ方向に売買します(値動きを増幅する)。</p><p>今日は100円動くごとに約${yen(g.gamma100)}枚、1%(約${yen(a.spot / 100)}円)で約${yen(g.gamma1pct)}枚。大きいほど相場が走りやすい状態です。ガンマが集中する行使価格の近くでは特に大きくなります。</p></dd>
+      <dt>セータ</dt><dd><p>時間がたつだけでオプションの価値が減る分。買い手が毎日払い、売り手が毎日受け取る「保険料の日割り」にあたります。</p><p>今日は1日あたり約${(g.thetaYen / 1e8).toFixed(1)}億円(うち期近 ${(g.thetaFrontYen / 1e8).toFixed(1)}億円)。SQが近づくほど期近のセータは大きくなり、売り手は「動かなければ毎日これだけ稼げる」ので、レンジ内に押さえ込む動きの動機になります。逆に、セータで稼ぐ分を超えて値が動くと、売り手は損失を避けるためにヘッジ売買を急ぎます。</p></dd>
+      <dt>グラフ</dt><dd>横軸は日経平均の水準。線はその価格になったときの売り手のヘッジ先物の量、棒はその価格でのガンマ(100円あたりの売買枚数)。棒が高い価格帯ほど、そこを通過するときにヘッジ売買が大きくなります。</dd>
+    </dl></details>
     <p class="muted small">建玉はすべて売り手がショートし、売り手だけが先物でデルタヘッジすると仮定した推定です(買い手のヘッジやヘッジしない売り手は考慮していません)。Black-Scholes(金利・配当0)で、IVは JPX 清算値段の行使価格別ボラティリティ、残日数は暦日。グラフは価格だけが動いた場合(IV・残日数は現在のまま)のヘッジ量とガンマです。オプション1枚 = 指数×1,000円 = 先物ラージ1枚相当。</p>`;
 }
 
@@ -160,6 +166,60 @@ function sqChart(hist: SqueezeHist[]): string {
     ${ticks}<text x="${W - P}" y="${H - 22}" text-anchor="end"><tspan class="sq-put-t">━ プット売り手</tspan>　<tspan class="sq-call-t">━ コール売り手</tspan>　<tspan class="sq-spot-t">┄ 日経平均</tspan></text></svg>`;
 }
 
+/** 正規分布の片側確率(SQ 時点で損益分岐を越えている確率の目安) */
+const tailProb = (z: number) => {
+  const t = 1 / (1 + 0.2316419 * Math.abs(z));
+  const p = 0.3989423 * Math.exp(-z * z / 2) * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
+  return z >= 0 ? p : 1 - p;
+};
+
+/** 要素ごとの解説: 何を測っているか・数字の読み方・今日の読み */
+function sqExplain(a: DailyAnalysis): string {
+  const q = a.squeeze!;
+  const em = a.expectedMove ?? a.spot * 0.04;
+  const days = a.front.days;
+  const lvl = (v: number, steps: [number, string][], last: string) => (steps.find(([t]) => v < t)?.[1] ?? last);
+  const today = (k: SqKey): string => {
+    const p = q.put.comps[k], c = q.call.comps[k];
+    const side = (s: Side, v: typeof p) => {
+      if (!v) return `${s === "put" ? "プット" : "コール"}側: データなし`;
+      const who = s === "put" ? "プット" : "コール";
+      switch (k) {
+        case "dist": {
+          const be = s === "put" ? a.seller?.putBreakeven : a.seller?.callBreakeven;
+          if (be == null) return `${who}側: 損益分岐が計算範囲(現値±20%)の外にあり、当面は届かない距離`;
+          const gap = Math.abs(be - a.spot);
+          return `${who}側: 損益分岐 ${yen(be)} まで${s === "put" ? "下" : "上"}に ${yen(gap)}円 = ${v.value.toFixed(2)}σ(${lvl(v.value, [[0.5, "非常に近い"], [1, "近い"], [2, "平常"]], "遠い")})。SQ時点でここを${s === "put" ? "割っている" : "超えている"}確率は正規分布の目安で約${Math.round(tailProb(v.value) * 100)}%`;
+        }
+        case "loss": return `${who}側: ${signed(v.value * 100, 1)}%(${lvl(v.value, [[-0.05, "改善"], [0.05, "横ばい"], [0.15, "悪化"]], "大きく悪化")})`;
+        case "near": return `${who}側: ${(v.value * 100).toFixed(0)}%(${lvl(v.value, [[0.12, "少ない"], [0.28, "平常"], [0.4, "多い"]], "非常に多い")})`;
+        case "vol": return `${who}側: ${signed(v.value, 1)}pt(${lvl(v.value, [[-1, "売り手に有利"], [1, "横ばい"], [3, "追い打ち"]], "強い追い打ち")})`;
+        case "cover": return v.value === 0 ? `${who}側: ${who === "プット" ? "上げた" : "下げた"}日なので対象外` : `${who}側: ${(v.value * 100).toFixed(1)}% 減(${lvl(v.value, [[0.01, "ほぼなし"], [0.03, "小さい"], [0.06, "目立つ"]], "大きい")})`;
+      }
+    };
+    return `${side("put", p)} / ${side("call", c)}`;
+  };
+  const items: [SqKey, string, string][] = [
+    ["dist", "売り手全体の損益分岐(SQ時点でその価格になると、受け取ったプレミアムを損失が上回る価格)が、現値からどれだけ離れているかを、SQまでの想定変動幅(1σ)の何倍かで表したもの。",
+      `1σ = ±${yen(em)}円(ATM IV ${a.atmIv?.toFixed(1) ?? "—"}% から計算した、SQまで${days}日の標準的な値動きの幅)。0.5σ未満は「普通の値動きで届く」、1σ未満は「近い」、2σ以上は「遠い」。距離が近いほど売り手は守りに入り、ヘッジ売買や損切りが出やすくなります。点数は 1.5σ を平常(50点)とし、近いほど高くなります。`],
+    ["loss", "期近の建玉すべてを当日の清算価格で評価した時価の合計(= 売り手が買い戻すのに必要な金額 = 売り手の負債)が、前日から何%増えたか。",
+      "プラスは売り手の含み損が増えた(オプションが値上がりした)こと、マイナスは時間価値の減少などで売り手が得をしたことを表します。±5%程度は日常の範囲、+15%以上は大きな悪化。プットとコールで逆に動くのが普通です。"],
+    ["near", "踏まれる側、つまり現値から1σ以内でこれから損失側(イン・ザ・マネー)に入りやすい行使価格にある建玉が、期近の建玉全体の何%か。プットは現値の1σ下〜少し上、コールは現値の少し下〜1σ上。",
+      "20%前後が平常。多いほど、少し動いただけで多くの売り手が同時に損失側に入り、ヘッジ売買がまとまって出やすい状態です。"],
+    ["vol", "ATM IV(オプションの価格に織り込まれた予想変動率)と、スキュー(下値プットの IV − 上値コールの IV)の前日からの変化。プット側は IV + スキュー、コール側は IV − スキューで見ます。",
+      "プラスはオプションが割高になり、価格が動かなくても売り手の評価損が膨らむこと(ベガ損)を表します。単位は pt(IV の%ポイント)。±1pt は日常の範囲、+3pt以上は強い追い打ち。"],
+    ["cover", "踏まれる方向に動いた日(プット側は下げた日、コール側は上げた日)に、現値±1σの建玉が前日から何%減ったか。",
+      "売り手が損切りで買い戻すと建玉が減ります。数字が大きいほど「実際に投げが出ている」証拠。3%以上の減少で目立つ水準です。反対方向に動いた日は対象外(50点扱い)。"],
+  ];
+  const nHist = q.put.comps.dist?.mode === "percentile" ? "過去の履歴の中での順位(パーセンタイル)。80点なら過去の80%の日より恐怖が大きい" : "固定の目安(50 + 50 × tanh(標準化値))。標準化値 ±1 で約 88点/12点。60営業日たまると過去の中での順位に切り替わります";
+  return `<details class="explain" open><summary>数字の読み方</summary>
+    <dl>
+      <dt>指数(0〜100)</dt><dd>5つの要素の点数の平均。50 = 平常、60以上 = 警戒、75以上 = パニック、40以下 = 落ち着き、25以下 = 楽観。プット売り手の指数が高い = 下落で踏まれる恐怖が強い(下げが加速しやすい)、コール売り手の指数が高い = 上昇で踏まれる恐怖が強い(踏み上げが起きやすい)。恐怖が極端に高まった後は、投げが一巡して反転することもあります。</dd>
+      <dt>点(各要素)</dt><dd>${nHist}。</dd>
+      ${items.map(([k, what, read]) => `<dt>${SQ_LABEL[k]}</dt><dd><p>${what}</p><p>${read}</p><p class="today">今日: ${today(k)}</p></dd>`).join("")}
+    </dl></details>`;
+}
+
 function squeezeSection(a: DailyAnalysis, hist: SqueezeHist[]): string {
   const q = a.squeeze;
   if (!q) return "";
@@ -174,6 +234,7 @@ function squeezeSection(a: DailyAnalysis, hist: SqueezeHist[]): string {
     <div class="sq-wrap">${sqGauge("プット売り手(下落で踏まれる)", q.put, "down")}${sqGauge("コール売り手(上昇で踏まれる)", q.call, "up")}</div>
     <div class="table-wrap"><table><thead><tr><th>要素</th><th>プット側</th><th>点</th><th>コール側</th><th>点</th></tr></thead><tbody>${rows}</tbody></table></div>
     ${sqChart(hist)}
+    ${sqExplain(a)}
     <p class="muted small">オプションの売り手が「踏まれる」恐怖を 0〜100 で表した本サイト独自の指数(50 = 平常、60以上 警戒、75以上 パニック)。期近限月について、①現値から売り手全体の損益分岐までが SQ までの 1σ の何倍か、②建玉全体の時価(売り手の負債)の前日比、③現値から 1σ 以内の踏まれる側にある建玉の比率、④ATM IV とスキューの前日比(プット側は IV+スキュー、コール側は IV−スキュー)、⑤踏まれる方向に動いた日の現値近辺の建玉の減少(損切りの買い戻し)を点数化して平均しています。${mode}。</p>`;
 }
 
@@ -220,8 +281,14 @@ export const DAILY_CSS = `
 .kpi small{display:block;font-size:12px;color:var(--muted)}.small{font-size:12px}
 .sp-put{fill:none;stroke:var(--down);stroke-width:2}.sp-call{fill:none;stroke:var(--up);stroke-width:2}
 svg tspan.sp-put-t{fill:var(--down)}svg tspan.sp-call-t{fill:var(--up)}.be{stroke:#7c3aed;stroke-dasharray:4 3}.be-t{fill:#7c3aed!important;font-size:10px}
+details.explain{margin:10px 0;padding:8px 12px;border:1px solid var(--line,#8883);border-radius:10px;font-size:13px;line-height:1.7}
+details.explain summary{cursor:pointer;font-weight:700}details.explain dt{font-weight:700;margin-top:10px}details.explain dd{margin:2px 0 0 0}
+details.explain dd p{margin:2px 0}details.explain .today{color:var(--fg);background:#8881;border-radius:6px;padding:2px 6px}
 .sq-hot{color:#dc2626!important;font-weight:700}.sq-calm{color:#16a34a!important}
-.sq-wrap{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:10px 0}@media(max-width:720px){.sq-hot{color:#dc2626!important;font-weight:700}.sq-calm{color:#16a34a!important}
+.sq-wrap{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:10px 0}@media(max-width:720px){details.explain{margin:10px 0;padding:8px 12px;border:1px solid var(--line,#8883);border-radius:10px;font-size:13px;line-height:1.7}
+details.explain summary{cursor:pointer;font-weight:700}details.explain dt{font-weight:700;margin-top:10px}details.explain dd{margin:2px 0 0 0}
+details.explain dd p{margin:2px 0}details.explain .today{color:var(--fg);background:#8881;border-radius:6px;padding:2px 6px}
+.sq-hot{color:#dc2626!important;font-weight:700}.sq-calm{color:#16a34a!important}
 .sq-wrap{grid-template-columns:1fr}}
 .sq-g{border:1px solid var(--line,#8883);border-radius:10px;padding:10px 12px}.sq-g-head{display:flex;align-items:baseline;gap:8px}.sq-g-head span{font-size:13px;flex:1}
 .sq-g-head strong{font-size:28px}.sq-g-head em{font-style:normal;font-size:13px;color:var(--muted)}

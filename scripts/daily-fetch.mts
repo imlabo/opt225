@@ -14,6 +14,8 @@ import type { IchimokuPayload } from "../src/daily.ts";
 import { sqFeatures, type Features } from "../src/model.ts";
 import type { SqueezeHist } from "../src/squeeze.ts";
 import { DEFAULT_CONFIG, priorWith, tune, type ModelConfig, type Sample } from "../src/tuning.ts";
+import { tuneWeekly, weeklyOutcomes, WEEKLY_PRIOR, type WeeklyWeights } from "../src/weekly-tuning.ts";
+import type { Investor } from "../src/types.ts";
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36";
 const NK_CSV = "https://indexes.nikkei.co.jp/nkave/historical/nikkei_stock_average_daily_jp.csv";
@@ -159,6 +161,22 @@ if (input && site) {
     console.log(`tuning: ${samples.length} samples, ${Date.now() - t0}ms — ${report.note}`);
     await post("/admin/model-config", { config, report });
   } catch (e) { console.log(`::warning title=Tuning::${e}`); }
+}
+
+// ---- 2.7) 週次スコアの答え合わせと重みの学習 ----
+if (site) {
+  try {
+    const analyses = (await (await fetch(`${site}/api/history`)).json()) as { weekEnd: string; score: number; bias: string; investors: { investor: Investor; z: number }[] }[];
+    const cur = (await (await fetch(`${site}/api/weekly/config`)).json()) as { weights: WeeklyWeights };
+    // 日経平均の終値: 公式 CSV + Yahoo 補完 + 当日の JPX 原資産価格
+    const prices: { date: string; value: number }[] = merged.bars.map((b) => ({ date: b.date, value: b.close }));
+    if (input && (!prices.length || prices[prices.length - 1].date < input.tradeDate)) prices.push({ date: input.tradeDate, value: input.spot });
+    const samples = weeklyOutcomes(analyses, prices);
+    const asOfDate = input?.tradeDate ?? asOf;
+    const { weights, report } = tuneWeekly(samples, cur.weights ?? WEEKLY_PRIOR, asOfDate);
+    console.log(`weekly: ${analyses.length} weeks, ${samples.length} evaluated, shown hit ${report.shown.hits}/${report.shown.calls}, walk-forward ll ${report.walkForward.logloss.toFixed(3)} — ${report.note}`);
+    await post("/admin/weekly-config", { weights, report });
+  } catch (e) { console.log(`::warning title=Weekly tuning::${e}`); }
 }
 
 // ---- 3) 日次データ送信 ----

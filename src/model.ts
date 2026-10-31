@@ -127,27 +127,30 @@ function solve(A: number[][], b: number[]): number[] {
   return M.map((r, i) => (r[i] === 0 ? 0 : r[n] / r[i]));
 }
 
-/** リッジ付きロジスティック回帰(ニュートン法)。y=1 は上昇 */
-export function fit(samples: { x: Features; y: 0 | 1 }[], prior: Weights = PRIOR, ridge = RIDGE): Weights {
-  const w0 = vec(prior);
+/** 汎用: リッジ付きロジスティック回帰(ニュートン法)。rows は切片列込みの説明変数、w0 は事前仮説(そこへ引き戻す) */
+export function fitLogistic(rows: number[][], ys: (0 | 1)[], w0: number[], ridge: number): number[] {
   let w = [...w0];
   const d = w.length;
   for (let it = 0; it < 25; it++) {
     const g = w.map((wi, i) => ridge * (wi - w0[i]));
     const H = Array.from({ length: d }, (_, i) => Array.from({ length: d }, (_, j) => (i === j ? ridge : 0)));
-    for (const s of samples) {
-      const r = row(s.x);
+    rows.forEach((r, k) => {
       const p = sigmoid(r.reduce((acc, ri, i) => acc + ri * w[i], 0));
       for (let i = 0; i < d; i++) {
-        g[i] += (p - s.y) * r[i];
+        g[i] += (p - ys[k]) * r[i];
         for (let j = 0; j < d; j++) H[i][j] += p * (1 - p) * r[i] * r[j];
       }
-    }
+    });
     const step = solve(H, g);
     w = w.map((wi, i) => wi - step[i]);
     if (Math.max(...step.map(Math.abs)) < 1e-6) break;
   }
-  return unvec(w);
+  return w;
+}
+
+/** リッジ付きロジスティック回帰。y=1 は上昇 */
+export function fit(samples: { x: Features; y: 0 | 1 }[], prior: Weights = PRIOR, ridge = RIDGE): Weights {
+  return unvec(fitLogistic(samples.map((s) => row(s.x)), samples.map((s) => s.y), vec(prior), ridge));
 }
 
 /** |実際の変動| / 1σ の分布から、68% が収まる係数 k を推定(サンプルが少ないうちは 1 に寄せる) */

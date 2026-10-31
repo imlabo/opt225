@@ -14,11 +14,7 @@ import { INVESTORS, INVESTOR_LABEL, type FlowRow, type Investor, type WeekData }
  *  - 海外投資家: 順張りシグナル(参考として小さめの重み)。
  * さらに、個人のオプション純売り(ショート・ボラ)の膨張は急変動リスクとして別指標化する。
  */
-export const WEIGHTS: Record<"individual" | "corporate" | "foreign", number> = {
-  individual: -0.45,
-  corporate: 0.35,
-  foreign: 0.2,
-};
+export const WEIGHTS: Record<Investor, number> = { individual: -0.45, corporate: 0.35, foreign: 0.2, securities: 0, proprietary: 0 }; // 事前仮説。学習後の重みは fg_meta "weekly_weights"
 export const POSITION_WINDOW = 4; // 推定ポジションの累積週数
 export const Z_WINDOW = 26; // z スコアの母集団(週)
 
@@ -84,7 +80,7 @@ export function biasLabel(score: number): string {
 }
 
 /** history は古い順。最後の要素が分析対象の週。 */
-export function analyze(history: WeekData[]): Analysis {
+export function analyze(history: WeekData[], weights: Record<Investor, number> = WEIGHTS): Analysis {
   if (history.length === 0) throw new Error("no data");
   const target = history[history.length - 1];
   const idx = history.length - 1;
@@ -105,12 +101,12 @@ export function analyze(history: WeekData[]): Analysis {
   for (const m of investors) m.short = shortEstimate(history, m.investor);
 
   const byInv = (inv: Investor) => investors.find((m) => m.investor === inv)!;
-  const contributions = (Object.keys(WEIGHTS) as (keyof typeof WEIGHTS)[]).map((inv) => ({
-    investor: inv as Investor,
+  const contributions = INVESTORS.filter((inv) => Math.abs(weights[inv] ?? 0) >= 0.005).map((inv) => ({
+    investor: inv,
     label: INVESTOR_LABEL[inv],
-    value: WEIGHTS[inv] * clamp(byInv(inv).z, -3, 3) * (100 / 3),
+    value: (weights[inv] ?? 0) * clamp(byInv(inv).z, -3, 3) * (100 / 3),
   }));
-  const score = Math.round(clamp(sum(contributions.map((c) => c.value)) / sum(Object.values(WEIGHTS).map(Math.abs)), -100, 100));
+  const score = Math.round(clamp(sum(contributions.map((c) => c.value)) / (sum(INVESTORS.map((i) => Math.abs(weights[i] ?? 0))) || 1), -100, 100));
 
   // 個人のショート・ボラ偏重(z)で急変動リスクを判定
   const indSell = history.map((w) => weekMetrics(w.flows, "individual").optionNetSell);
@@ -124,8 +120,9 @@ export function analyze(history: WeekData[]): Analysis {
   const ind = byInv("individual");
   const corp = byInv("corporate");
   const dir = (v: number) => (v > 0 ? "強気" : v < 0 ? "弱気" : "中立");
+  const indW = weights.individual ?? 0;
   const comment =
-    `個人は推定ポジション${dir(ind.position)}(z=${ind.z.toFixed(2)})で逆張り的に${ind.z > 0 ? "上値の重さ" : ind.z < 0 ? "下値の堅さ" : "影響小"}を示唆。` +
+    `個人は推定ポジション${dir(ind.position)}(z=${ind.z.toFixed(2)})で${indW < 0 ? "逆張り的に" : "順張り的に"}${ind.z * indW > 0 ? "上昇" : ind.z * indW < 0 ? "下落" : "影響小"}を示唆。` +
     `法人は${dir(corp.position)}(z=${corp.z.toFixed(2)})。総合スコア${score > 0 ? "+" : ""}${score}で「${bias}」、ボラ環境は「${volSignal}」。`;
 
   return { weekEnd: target.weekEnd, score, bias, volSignal, investors, contributions, futNet, comment };

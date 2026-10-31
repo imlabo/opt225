@@ -9,6 +9,8 @@ import type { ModelLog, PredictionRow, SentimentView } from "./db";
 import type { Prediction } from "./model";
 import type { SqueezeHist } from "./squeeze";
 import type { ModelConfig, TuningReport } from "./tuning";
+import type { WeeklyReport } from "./weekly-tuning";
+import { INVESTORS, INVESTOR_LABEL } from "./types";
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 const fmt = (n: number) => (n > 0 ? "+" : "") + Math.round(n).toLocaleString("ja-JP");
@@ -39,6 +41,40 @@ function scoreChart(list: Analysis[]): string {
     ${bars}${labels}</svg>`;
 }
 
+/** 週次スコアの答え合わせと重みの学習 */
+function weeklyReportBlock(r: WeeklyReport | undefined, latest: Analysis): string {
+  const pct = (v: number | null) => (v == null ? "—" : `${Math.round(v * 100)}%`);
+  const md = (d: string) => d.slice(5).replace("-", "/");
+  const weights = r?.weights ?? Object.fromEntries(INVESTORS.map((i) => [i, 0])) as Record<string, number>;
+  const prior = r?.prior ?? weights;
+  const wRows = INVESTORS.map((i) => {
+    const w = weights[i] ?? 0, p = prior[i] ?? 0, d = w - p;
+    const role = Math.abs(w) < 0.02 ? "ほぼ使わない" : w < 0 ? "逆張り(強気なら下落、弱気なら上昇)" : "順張り(強気なら上昇)";
+    return `<tr><td>${INVESTOR_LABEL[i]}</td><td>${p.toFixed(2)}</td><td>${w.toFixed(2)}</td><td class="${d > 0.005 ? "up" : d < -0.005 ? "down" : ""}">${d >= 0 ? "+" : ""}${d.toFixed(2)}</td><td>${role}</td></tr>`;
+  }).join("");
+  const head = `<h4>予想と結果(週次スコアの答え合わせ)</h4>`;
+  if (!r) return `<section class="card">${head}<p class="small muted">週次データは翌週木曜に公表されるため、公表日の終値から翌週の公表日の終値までの日経平均の変化で答え合わせします。1 週分の結果が出ると表示します。</p>
+    <div class="table-wrap"><table><thead><tr><th>部門</th><th>仮説</th><th>現在</th><th>補正</th><th>読み方</th></tr></thead><tbody>${wRows}</tbody></table></div></section>`;
+  const rows = [...r.samples].reverse().map((s) => {
+    const called = Math.abs(s.score) >= 15;
+    const hit = called ? ((s.score > 0) === (s.y === 1) ? "◯" : "×") : "—";
+    return `<tr><td>${md(s.weekEnd)}週</td><td class="${cls(s.score)}">${esc(s.bias)}(${s.score > 0 ? "+" : ""}${s.score})</td><td>${md(s.from)}→${md(s.to)}</td><td class="${s.y ? "up" : "down"}">${num(s.c0)} → ${num(s.c1)}(${s.ret >= 0 ? "+" : "−"}${(Math.abs(s.ret) * 100).toFixed(1)}%)</td><td>${hit}</td></tr>`;
+  }).join("");
+  const inv = r.investors.filter((x) => x.n >= 2).map((x) => `${x.label}: 強気の週の翌週上昇 ${pct(x.upWhenPositive)}`).join(" / ");
+  return `<section class="card">${head}
+    <div class="kpis">
+      <div class="kpi"><span>表示した見通しの的中</span><strong>${pct(r.shown.hitRate)}</strong><small>${r.shown.hits}/${r.shown.calls}件(「やや」以上の見通しを出した週。中立は除く)。期間中の翌週上昇率 ${pct(r.upRate)}</small></div>
+      <div class="kpi"><span>学習込みの検証</span><strong>${pct(r.walkForward.hitRate)}</strong><small>その週より前だけで学習した重みでの的中(${r.walkForward.calls}件)。対数損失 ${r.walkForward.logloss.toFixed(3)}(仮説のみ ${r.priorOnly.logloss.toFixed(3)}、0.693 がコイン投げ)</small></div>
+      <div class="kpi"><span>${md(r.date)} の見直し</span><strong>${r.changed ? "重みを更新" : "据え置き"}</strong><small>${esc(r.note)}</small></div>
+    </div>
+    <div class="table-wrap"><table><thead><tr><th>データの週</th><th>見通し(スコア)</th><th>評価区間</th><th>日経平均</th><th>的中</th></tr></thead><tbody>${rows}</tbody></table></div>
+    ${inv ? `<p class="small muted">部門別の素の当たり方 — ${inv}</p>` : ""}
+    <h4>重み(学習による補正)</h4>
+    <div class="table-wrap"><table><thead><tr><th>部門</th><th>仮説</th><th>現在</th><th>補正</th><th>読み方</th></tr></thead><tbody>${wRows}</tbody></table></div>
+    <p class="muted small">週次データは翌週木曜に公表されるため、公表日の終値から翌週の公表日の終値までの日経平均の変化を予想対象とします。毎日の取り込み時に答え合わせを更新し、各部門の推定ポジション(z)を説明変数、翌週の上昇/下落を目的変数とするリッジ付きロジスティック回帰で重みを学習します。${8}週たまるまでは仮説の重みのまま、以後は仮説より十分良い場合に学習した重みへ切り替え、スコアと見通しは全週を再計算します。現在のスコア ${latest.score > 0 ? "+" : ""}${latest.score} はこの重みで計算したものです。</p>
+  </section>`;
+}
+
 function gauge(score: number): string {
   const pctPos = (score + 100) / 2;
   return `<div class="gauge"><div class="gauge-track"><span class="tick" style="left:${pctPos}%"></span></div>
@@ -50,6 +86,7 @@ export function renderPage(opts: {
   daily?: { latest?: DailyAnalysis; history: DailyAnalysis[]; strikes: DailyStrike[]; squeezeHist?: SqueezeHist[] };
   ichimoku?: DailyAnalysis["ichimoku"]; // 最新の一目均衡表(JPX 未公表日は日次より新しいことがある)
   model?: { prediction: Prediction | null; recent: PredictionRow[]; logs: ModelLog[]; config?: ModelConfig; tuning?: TuningReport[] };
+  weekly?: WeeklyReport; // 週次スコアの答え合わせと重みの学習
   sentiment?: SentimentView;
 }): string {
   const { latest, history, week } = opts;
@@ -101,7 +138,8 @@ export function renderPage(opts: {
       .join("")}</ul>
   </section>
 
-  <section class="card"><h3>総合スコア推移</h3>${scoreChart(history)}</section>`;
+  <section class="card"><h3>総合スコア推移</h3>${scoreChart(history)}</section>
+  ${weeklyReportBlock(opts.weekly, latest)}`;
 
   return `<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>日経225 OPフロー観測</title>

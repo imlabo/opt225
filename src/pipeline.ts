@@ -3,7 +3,8 @@ import { evaluatePending, loadAnalyses, loadMeta, saveMeta, loadSentiment, loadD
 import { calibrateK, features, fit, ichiMetrics, makePrediction, metrics, PRIOR, sqFeatures, type Features, type Prediction } from "./model";
 import { configLabel, DEFAULT_CONFIG, mask, type ModelConfig } from "./tuning";
 import { composeDailyTweet } from "./x";
-import { analyze } from "./analysis";
+import { analyze, WEIGHTS } from "./analysis";
+import type { WeeklyWeights } from "./weekly-tuning";
 import { hasWeek, loadHistory, logPost, saveAnalysis, saveWeek, wasPosted } from "./db";
 import { discoverLatestFiles, fetchWeek, weekFromFileName } from "./jpx";
 import type { Env, WeekData } from "./types";
@@ -55,12 +56,18 @@ export async function ingestManual(env: Env, w: WeekData) {
   await saveWeek(env, w);
 }
 
+/** 週次スコアの重み(学習済みがあればそれ、なければ事前仮説) */
+export async function weeklyWeights(env: Env) {
+  return (await loadMeta<WeeklyWeights>(env, "weekly_weights")) ?? WEIGHTS;
+}
+
 export async function analyzeAndPost(env: Env, forcePost = false) {
   const history = await loadHistory(env);
   if (!history.length) return { analyzed: undefined, post: undefined };
+  const w = await weeklyWeights(env);
   // 全週を再分析(重み変更時も履歴が整合する)
-  for (let i = 0; i < history.length; i++) await saveAnalysis(env, analyze(history.slice(0, i + 1)));
-  const latest = analyze(history);
+  for (let i = 0; i < history.length; i++) await saveAnalysis(env, analyze(history.slice(0, i + 1), w));
+  const latest = analyze(history, w);
   const week = history[history.length - 1];
 
   if (week.isSample) return { analyzed: latest.weekEnd, post: { status: "skipped_sample" } };

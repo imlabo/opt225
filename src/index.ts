@@ -6,7 +6,8 @@ import type { DailyInput, IchimokuPayload } from "./daily";
 /** /admin/ingest-ichimoku のボディ・fg_meta "ichimoku_latest" の中身 */
 interface IchimokuLatest { tradeDate: string; close: number; ichimoku: IchimokuPayload }
 import { decodeJpx, parseWeeklyCsv } from "./jpx";
-import { analyzeAndPost, ingestDaily, ingestManual, rebuildSqueeze, runPipeline } from "./pipeline";
+import { analyzeAndPost, ingestDaily, ingestManual, rebuildSqueeze, runPipeline, weeklyWeights } from "./pipeline";
+import type { WeeklyReport, WeeklyWeights } from "./weekly-tuning";
 import type { SqueezeHist } from "./squeeze";
 import { DEFAULT_CONFIG, type ModelConfig, type TuningReport } from "./tuning";
 import { renderPage } from "./page";
@@ -27,6 +28,7 @@ app.get("/", async (c) => {
     loadMeta<IchimokuLatest>(c.env, "ichimoku_latest"), loadMeta<SqueezeHist[]>(c.env, "squeeze_hist"),
     loadMeta<ModelConfig>(c.env, "model_config"), loadMeta<TuningReport[]>(c.env, "model_tuning_log"),
   ]);
+  const weeklyReport = await loadMeta<WeeklyReport>(c.env, "weekly_tuning");
   const ichimoku = latestIchi && (!dl?.ichimoku || latestIchi.tradeDate > dl.ichimoku.result.date)
     ? { ...latestIchi.ichimoku, basis: dl?.ichimoku?.basis ?? 0 }
     : dl?.ichimoku;
@@ -35,6 +37,7 @@ app.get("/", async (c) => {
     latest: history[history.length - 1], history, week: weeks[0], siteUrl: c.env.SITE_URL,
     daily: { latest: dl, history: dailyHistory, strikes, squeezeHist: squeezeHist ?? [] }, ichimoku,
     model: { prediction, recent, logs, config: modelConfig ?? DEFAULT_CONFIG, tuning: tuningLog ?? [] },
+    weekly: weeklyReport ?? undefined,
     sentiment,
   }));
 });
@@ -87,9 +90,22 @@ app.post("/admin/ingest", async (c) => {
 /** 保存済みの週次データを再分析(投稿はしない)。分析ロジック変更後のデプロイ時に使用 */
 app.post("/admin/reanalyze", async (c) => {
   const history = await loadHistory(c.env, undefined, 500);
-  for (let i = 0; i < history.length; i++) await saveAnalysis(c.env, analyze(history.slice(0, i + 1)));
-  return c.json({ weeks: history.length });
+  const w = await weeklyWeights(c.env);
+  for (let i = 0; i < history.length; i++) await saveAnalysis(c.env, analyze(history.slice(0, i + 1), w));
+  return c.json({ weeks: history.length, weights: w });
 });
+
+/** 週次スコアの答え合わせ結果と学習した重みを保存し、全週を再分析(GitHub Actions の scripts/daily-fetch.mts から) */
+app.post("/admin/weekly-config", async (c) => {
+  const b = await c.req.json<{ weights: WeeklyWeights; report: WeeklyReport }>();
+  if (!b.weights || !INVESTORS.every((i) => Number.isFinite(b.weights[i]))) return c.json({ error: "invalid body" }, 400);
+  await saveMeta(c.env, "weekly_weights", b.weights);
+  if (b.report) await saveMeta(c.env, "weekly_tuning", b.report);
+  const history = await loadHistory(c.env, undefined, 500);
+  for (let i = 0; i < history.length; i++) await saveAnalysis(c.env, analyze(history.slice(0, i + 1), b.weights));
+  return c.json({ ok: true, weeks: history.length, changed: b.report?.changed ?? false, note: b.report?.note });
+});
+app.get("/api/weekly/config", async (c) => c.json({ weights: await weeklyWeights(c.env), report: await loadMeta<WeeklyReport>(c.env, "weekly_tuning") }));
 
 /** 市場心理指数の投入(GitHub Actions の scripts/daily-fetch.mts から) */
 app.post("/admin/ingest-sentiment", async (c) => {

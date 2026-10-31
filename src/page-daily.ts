@@ -277,6 +277,7 @@ export function renderDailySection(a: DailyAnalysis | undefined, history: DailyA
 }
 
 export const DAILY_CSS = `
+h5{margin:10px 0 4px;font-size:13px}
 .kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:12px 0}@media(max-width:720px){.kpis{grid-template-columns:repeat(2,1fr)}}
 .kpi small{display:block;font-size:12px;color:var(--muted)}.small{font-size:12px}
 .sp-put{fill:none;stroke:var(--down);stroke-width:2}.sp-call{fill:none;stroke:var(--up);stroke-width:2}

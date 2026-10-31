@@ -58,13 +58,13 @@ export function renderModelSection(p: Prediction | null, recent: PredictionRow[]
     <div class="kpis">
       <div class="kpi"><span>上昇確率</span><strong>${Math.round(p.pUp * 100)}%</strong><small>${Math.round((p.threshold ?? 0.55) * 100)}%以上で買い・${Math.round((1 - (p.threshold ?? 0.55)) * 100)}%以下で売り・その間は様子見</small></div>
       <div class="kpi"><span>予想レンジ(1σ)</span><strong>${yen(p.rangeLo)} 〜 ${yen(p.rangeHi)}</strong><small>±${yen(p.rangeHi - p.spot)}円 (係数 k=${p.k.toFixed(2)})</small></div>
-      <div class="kpi"><span>これまでの成績</span><strong>${met && met.n ? `判断 ${pct(met.hitRate)} / レンジ ${pct(met.rangeRate)}` : "検証待ち"}</strong><small>${met && met.n ? `検証${met.n}件・売買判断${met.calls}件・実際の上昇率${pct(met.upRate)}${met.ichi?.calls ? `・一目単体 ${pct(met.ichi.hitRate)}(${met.ichi.calls}件)` : ""}` : "翌営業日から答え合わせを開始"}</small></div>
+      <div class="kpi"><span>これまでの成績</span><strong>${met && met.n ? `判断 ${pct(met.hitRate)} / レンジ ${pct(met.rangeRate)}` : "検証待ち"}</strong><small>${met && met.n ? `検証${met.n}件・売買判断${met.calls}件・実際の上昇率${pct(met.upRate)}` : "翌営業日から答え合わせを開始"}</small></div>
     </div>
-    ${top ? `<p class="comment">主な根拠: ${top}。オプション建玉・投資部門別フロー・市場心理・一目均衡表を1つのモデルで総合しています。</p>` : ""}
+    ${top ? `<p class="comment">主な根拠: ${top}。オプション建玉・投資部門別フロー・市場心理などを1つのモデルで総合しています。</p>` : ""}
     ${record ? `<h4>答え合わせ(直近10件)</h4><div class="table-wrap"><table><thead><tr><th>判断日</th><th>判断(上昇確率)</th><th>翌営業日の実績</th><th>方向</th><th>レンジ内</th></tr></thead><tbody>${record}</tbody></table></div>` : ""}
     <details open><summary><b>予測ロジックの自動改善(毎日の見直し)</b></summary>${tuningBlock(cfg, tuning)}</details>
     <details><summary><b>学習による補正(重みの変化)</b></summary>
-      <p class="small muted">一目均衡表の重みは2023年以降の過去データのバックテストで学習した値を、その他は仮説の値を起点(学習前)にしています。検証済みの判断が増えるたびに、そこから実績に合わせて重みを毎日再計算しています。サンプルが少ない間は事前仮説に近い値に留まります。予想レンジの係数 k は、実績で約68%がレンジ内に収まるよう調整されます。${met?.brier != null ? `確率の精度(ブライアスコア)は ${met.brier.toFixed(3)}(0.250 がコイン投げ相当、小さいほど良い)。` : ""}</p>
+      <p class="small muted">仮説の値を起点(学習前)にしています。検証済みの判断が増えるたびに、そこから実績に合わせて重みを毎日再計算しています。サンプルが少ない間は事前仮説に近い値に留まります。予想レンジの係数 k は、実績で約68%がレンジ内に収まるよう調整されます。${met?.brier != null ? `確率の精度(ブライアスコア)は ${met.brier.toFixed(3)}(0.250 がコイン投げ相当、小さいほど良い)。` : ""}</p>
       <div class="table-wrap"><table><thead><tr><th>特徴量</th><th>学習前</th><th>現在</th><th>補正</th></tr></thead><tbody>${weightsRows}</tbody></table></div>
     </details>
   </section>`;

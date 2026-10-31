@@ -1,11 +1,12 @@
 import { analyzeDaily, type DailyAnalysis, type DailyInput } from "./daily";
-import { evaluatePending, loadAnalyses, loadMeta, saveMeta, loadSentiment, loadDailyAnalyses, loadEvaluated, logDailyPost, saveDaily, saveModelLog, savePrediction, wasDailyPosted } from "./db";
+import { evaluatePending, loadAnalyses, loadMeta, saveMeta, loadSentiment, loadDailyAnalyses, loadDailyStrikes, loadEvaluated, logDailyPost, saveDaily, saveModelLog, savePrediction, wasDailyPosted } from "./db";
 import { calibrateK, features, fit, ichiMetrics, makePrediction, metrics, PRIOR, type Prediction } from "./model";
 import { composeDailyTweet } from "./x";
 import { analyze } from "./analysis";
 import { hasWeek, loadHistory, logPost, saveAnalysis, saveWeek, wasPosted } from "./db";
 import { discoverLatestFiles, fetchWeek, weekFromFileName } from "./jpx";
 import type { Env, WeekData } from "./types";
+import { squeezeRaw, squeezeScore, upsertHist, type SqueezeHist } from "./squeeze";
 import { composeTweet, postTweet } from "./x";
 
 export interface RunResult {
@@ -85,6 +86,13 @@ export async function analyzeAndPost(env: Env, forcePost = false) {
 export async function ingestDaily(env: Env, d: DailyInput, forcePost = false) {
   const [prev] = (await loadDailyAnalyses(env, 1, d.tradeDate)).slice(-1);
   const a = analyzeDaily(d, prev);
+  // 踏み上げ恐怖指数: 期近の建玉と前日分析から生値 → 過去の履歴と比べて点数化
+  try {
+    const raw = squeezeRaw(a, prev, d.strikes.filter((s) => s.month === a.front.month));
+    const hist = (await loadMeta<SqueezeHist[]>(env, "squeeze_hist")) ?? [];
+    a.squeeze = squeezeScore(raw, hist.filter((h) => h.date < a.tradeDate));
+    await saveMeta(env, "squeeze_hist", upsertHist(hist, raw, a.squeeze));
+  } catch (e) { console.log(`squeeze: ${e}`); }
   await saveDaily(env, d, a);
   const learn = await learnAndPredict(env, a);
 
@@ -140,4 +148,25 @@ function xCreds(env: Env) {
   return env.X_API_KEY && env.X_API_SECRET && env.X_ACCESS_TOKEN && env.X_ACCESS_SECRET
     ? { apiKey: env.X_API_KEY, apiSecret: env.X_API_SECRET, accessToken: env.X_ACCESS_TOKEN, accessSecret: env.X_ACCESS_SECRET }
     : null;
+}
+
+/** 保存済みの日次データから踏み上げ恐怖指数の履歴を作り直し、各日の分析にも書き戻す */
+export async function rebuildSqueeze(env: Env) {
+  const dates = (await env.DB.prepare("SELECT trade_date FROM daily_snapshots ORDER BY trade_date").all<{ trade_date: string }>()).results.map((r) => r.trade_date);
+  let hist: SqueezeHist[] = [];
+  let prev: DailyAnalysis | undefined;
+  for (const date of dates) {
+    const row = await env.DB.prepare("SELECT detail_json FROM daily_snapshots WHERE trade_date = ?").bind(date).first<{ detail_json: string }>();
+    if (!row) continue;
+    const a = JSON.parse(row.detail_json) as DailyAnalysis;
+    const strikes = await loadDailyStrikes(env, date, a.front.month);
+    const raw = squeezeRaw(a, prev, strikes);
+    a.squeeze = squeezeScore(raw, hist);
+    hist = upsertHist(hist, raw, a.squeeze);
+    await env.DB.prepare("UPDATE daily_snapshots SET detail_json = ? WHERE trade_date = ?").bind(JSON.stringify(a), date).run();
+    prev = a;
+  }
+  await saveMeta(env, "squeeze_hist", hist);
+  const last = hist[hist.length - 1];
+  return { days: hist.length, last: last && { date: last.date, put: Math.round(last.putIndex), call: Math.round(last.callIndex) } };
 }

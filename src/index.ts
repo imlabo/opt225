@@ -6,7 +6,8 @@ import type { DailyInput, IchimokuPayload } from "./daily";
 /** /admin/ingest-ichimoku のボディ・fg_meta "ichimoku_latest" の中身 */
 interface IchimokuLatest { tradeDate: string; close: number; ichimoku: IchimokuPayload }
 import { decodeJpx, parseWeeklyCsv } from "./jpx";
-import { analyzeAndPost, ingestDaily, ingestManual, runPipeline } from "./pipeline";
+import { analyzeAndPost, ingestDaily, ingestManual, rebuildSqueeze, runPipeline } from "./pipeline";
+import type { SqueezeHist } from "./squeeze";
 import { renderPage } from "./page";
 import { INVESTORS, type Env, type WeekData } from "./types";
 
@@ -21,14 +22,14 @@ app.get("/", async (c) => {
   const dl = dailyHistory[dailyHistory.length - 1];
   const strikes = dl ? await loadDailyStrikes(c.env, dl.tradeDate, dl.front.month) : [];
   // JPX 未公表の日でも一目均衡表は最新足(Yahoo 補完)で更新されている場合がある
-  const latestIchi = await loadMeta<IchimokuLatest>(c.env, "ichimoku_latest");
+  const [latestIchi, squeezeHist] = await Promise.all([loadMeta<IchimokuLatest>(c.env, "ichimoku_latest"), loadMeta<SqueezeHist[]>(c.env, "squeeze_hist")]);
   const ichimoku = latestIchi && (!dl?.ichimoku || latestIchi.tradeDate > dl.ichimoku.result.date)
     ? { ...latestIchi.ichimoku, basis: dl?.ichimoku?.basis ?? 0 }
     : dl?.ichimoku;
   c.header("Cache-Control", "public, max-age=300");
   return c.html(renderPage({
     latest: history[history.length - 1], history, week: weeks[0], siteUrl: c.env.SITE_URL,
-    daily: { latest: dl, history: dailyHistory, strikes }, ichimoku,
+    daily: { latest: dl, history: dailyHistory, strikes, squeezeHist: squeezeHist ?? [] }, ichimoku,
     model: { prediction, recent, logs },
     sentiment,
   }));
@@ -44,6 +45,7 @@ app.get("/api/daily/latest", async (c) => {
   return a ? c.json(a) : c.json({ error: "no data" }, 404);
 });
 app.get("/api/daily/history", async (c) => c.json(await loadDailyAnalyses(c.env, 250)));
+app.get("/api/squeeze", async (c) => c.json((await loadMeta<SqueezeHist[]>(c.env, "squeeze_hist")) ?? []));
 app.get("/api/sentiment", async (c) => c.json(await loadSentiment(c.env, Number(c.req.query("days") ?? 365))));
 app.get("/api/prediction/latest", async (c) => c.json(await loadLatestPrediction(c.env)));
 app.get("/api/prediction/track-record", async (c) => {
@@ -115,6 +117,9 @@ app.post("/admin/ingest-ichimoku", async (c) => {
   const updated = await updateDailyIchimoku(c.env, b.tradeDate, b.ichimoku);
   return c.json({ tradeDate: b.tradeDate, judgment: b.ichimoku.result.judgment, score: b.ichimoku.result.score, barsSource: b.ichimoku.barsSource, filled: b.ichimoku.filled ?? [], dailyUpdated: updated });
 });
+
+/** 踏み上げ恐怖指数の履歴を保存済み日次データから作り直す(デプロイ時に自動実行) */
+app.post("/admin/rebuild-squeeze", async (c) => c.json(await rebuildSqueeze(c.env)));
 
 /** JPX の週次 CSV をボディで送って解析結果だけ確認(保存しない) */
 app.post("/admin/parse-preview", async (c) => c.json(parseWeeklyCsv(decodeJpx(await c.req.arrayBuffer()))));

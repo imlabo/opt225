@@ -14,6 +14,7 @@ export interface DailyStrike {
 
 import type { Backtest, Ichimoku } from "./ichimoku";
 import { computeGreeks, type Greeks } from "./greeks";
+import type { Squeeze } from "./squeeze";
 
 /** 一目均衡表(GitHub Actions で計算して日次データに同梱) */
 export interface IchimokuPayload {
@@ -60,6 +61,7 @@ export interface DailyAnalysis {
   prev?: { tradeDate: string; pcr: number; atmIv: number | null; spot: number };
   seller?: SellerPnl;
   greeks?: Greeks; // 売り手のデルタヘッジ・ガンマ・セータ(全限月)
+  squeeze?: Squeeze; // 踏み上げ恐怖指数(取り込み時に履歴と合わせて算出)
   ichimoku?: IchimokuPayload & { basis: number }; // basis = 先物 − 現物(先物換算用)
   comment: string;
 }

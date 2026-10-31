@@ -106,6 +106,7 @@ jobs:
           echo "::notice title=GET /::$URL -> HTTP $CODE"
           if [ -n "$ADMIN_TOKEN" ]; then
             echo "::notice title=/admin/reanalyze::$(curl -s -X POST -H "Authorization: Bearer $ADMIN_TOKEN" "$URL/admin/reanalyze")"
+            echo "::notice title=/admin/rebuild-squeeze::$(curl -s -X POST -H "Authorization: Bearer $ADMIN_TOKEN" "$URL/admin/rebuild-squeeze")"
             RES=$(curl -s -X POST -H "Authorization: Bearer $ADMIN_TOKEN" "$URL/admin/run")
             echo "::notice title=/admin/run::$(echo "$RES" | jq -c '{ingested, errors, analyzed, post: .post.status}')"
           fi

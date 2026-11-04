@@ -241,6 +241,12 @@ app.get("/api/intraday", async (c) => {
     return c.json({ symbol: SYMBOL, tf: tf.tf, label: tf.label, bars: bars.slice(-400), levels: lv, climax: scanClimax(bars, lv) });
   } catch (e) { return c.json({ error: String(e).slice(0, 200) }, 500); }
 });
+/** X 投稿の記録(直近。本文・状態・エラー) */
+app.get("/api/posts", async (c) => {
+  const d = await c.env.DB.prepare("SELECT trade_date AS key, tweet_id, text, status, error, posted_at FROM daily_posts ORDER BY trade_date DESC LIMIT 5").all();
+  const w = await c.env.DB.prepare("SELECT week_end AS key, tweet_id, text, status, error, posted_at FROM posts ORDER BY week_end DESC LIMIT 3").all();
+  return c.json({ daily: d.results, weekly: w.results });
+});
 app.get("/api/alerts", async (c) => c.json({ cron: ((await loadMeta<unknown[]>(c.env, "cron_log")) ?? []).slice(-5), mail: await loadMeta<unknown>(c.env, "alert_test_sent"), state: await loadMeta<AlertState>(c.env, "alert_state"), log: ((await loadMeta<AlertLogItem[]>(c.env, "alert_log")) ?? []).slice(-20) }));
 /** 手動で判定(?send=1 で送信、?force=1 でクールダウン無視) */
 app.post("/admin/alert-check", async (c) => c.json(await runAlerts(c.env, { send: c.req.query("send") === "1", force: c.req.query("force") === "1" })));

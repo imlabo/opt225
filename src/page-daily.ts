@@ -1,4 +1,5 @@
 import type { DailyAnalysis, DailyStrike } from "./daily";
+import type { AlertLogItem } from "./alerts";
 import { MIN_HISTORY, SQ_KEYS, SQ_LABEL, type Side, type SqKey, type SqueezeHist, type SqueezeSide } from "./squeeze";
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
@@ -260,7 +261,70 @@ function trend(history: DailyAnalysis[]): string {
     .join("")}</tbody></table></div>`;
 }
 
-export function renderDailySection(a: DailyAnalysis | undefined, history: DailyAnalysis[], strikes: DailyStrike[], squeezeHist: SqueezeHist[] = []): string {
+/** 先物の分足チャート(5分・15分・60分): データは /api/intraday からブラウザで取得して描画 */
+function intradaySection(a: DailyAnalysis): string {
+  const be = a.seller;
+  const basis = a.fut ? a.fut.price - a.spot : 0;
+  const lv = (v: number | null | undefined) => (v != null ? yen(v + basis) : "—");
+  return `<h4>日経225先物 分足チャート <small class="muted">CME NKD=F(Yahoo Finance)、損益分岐は先物換算</small></h4>
+    <div class="tf-tabs" id="tf-tabs"><button data-tf="5m" class="on">5分足</button><button data-tf="15m">15分足</button><button data-tf="60m">60分足</button><span class="muted small" id="tf-status">読み込み中…</span></div>
+    <div id="tf-chart" class="tf-chart"></div>
+    <p class="muted small">黄色の破線 = プット売り手の損益分岐 ${lv(be?.putBreakeven)}、コール売り手の損益分岐 ${lv(be?.callBreakeven)}(${a.tradeDate} の建玉から)。▲▼ = 出来高が直近20本平均の2倍以上かつ値幅1.5倍以上のクライマックス足(安値引け=▼、高値引け=▲)。損益分岐の近く(0.8%以内)で出たものは大きく表示し、その時点でメール通知しています。5分ごとに自動更新。</p>
+    <script>${INTRADAY_JS}</script>`;
+}
+
+const INTRADAY_JS = `(function(){
+var cur="5m",timer=null;var el=document.getElementById("tf-chart"),st=document.getElementById("tf-status"),tabs=document.getElementById("tf-tabs");
+if(!el)return;
+function yen(n){return Math.round(n).toLocaleString("ja-JP")}
+function jst(t){var d=new Date(t*1000+9*3600e3);return (d.getUTCMonth()+1)+"/"+d.getUTCDate()+" "+String(d.getUTCHours()).padStart(2,"0")+":"+String(d.getUTCMinutes()).padStart(2,"0")}
+function draw(d){
+  var bars=d.bars.filter(function(b){return b.volume>0||b===d.bars[d.bars.length-1]});
+  var n={"5m":120,"15m":120,"60m":150}[d.tf]||120;bars=bars.slice(-n);
+  if(bars.length<5){el.innerHTML='<p class="muted">データがありません</p>';return}
+  var W=720,H=320,P=48,VH=60,CH=H-VH-30;
+  var lv=d.levels||{};var lvs=[lv.putLevel,lv.callLevel].filter(function(v){return v!=null});
+  var hi=Math.max.apply(null,bars.map(function(b){return b.high})),lo=Math.min.apply(null,bars.map(function(b){return b.low}));
+  lvs.forEach(function(v){if(Math.abs(v-bars[bars.length-1].close)/bars[bars.length-1].close<0.06){hi=Math.max(hi,v);lo=Math.min(lo,v)}});
+  var pad=(hi-lo)*0.05;hi+=pad;lo-=pad;
+  var vmax=Math.max.apply(null,bars.map(function(b){return b.volume}))||1;
+  var x=function(i){return P+(i+0.5)*(W-P-10)/bars.length},y=function(v){return 10+(hi-v)/(hi-lo)*CH},yv=function(v){return H-20-v/vmax*VH};
+  var cw=Math.max(1.5,(W-P-10)/bars.length*0.65);
+  var s='<svg viewBox="0 0 '+W+' '+H+'" role="img" aria-label="'+d.label+'">';
+  for(var k=0;k<=4;k++){var v=lo+(hi-lo)*k/4;s+='<line x1="'+P+'" x2="'+(W-10)+'" y1="'+y(v)+'" y2="'+y(v)+'" class="grid"/><text x="2" y="'+(y(v)+4)+'">'+(v/1000).toFixed(1)+'k</text>'}
+  var byT={};(d.climax||[]).forEach(function(c){byT[c.t]=c});
+  bars.forEach(function(b,i){var up=b.close>=b.open;
+    s+='<rect x="'+(x(i)-cw/2)+'" y="'+yv(b.volume)+'" width="'+cw+'" height="'+(H-20-yv(b.volume))+'" class="'+(up?"tf-vu":"tf-vd")+'"/>';
+    s+='<line x1="'+x(i)+'" x2="'+x(i)+'" y1="'+y(b.high)+'" y2="'+y(b.low)+'" class="'+(up?"ic-up":"ic-dn")+'"/>';
+    s+='<rect x="'+(x(i)-cw/2)+'" y="'+y(Math.max(b.open,b.close))+'" width="'+cw+'" height="'+Math.max(1,Math.abs(y(b.open)-y(b.close)))+'" class="'+(up?"ic-up-b":"ic-dn-b")+'"><title>'+jst(b.t)+' 始'+yen(b.open)+' 高'+yen(b.high)+' 安'+yen(b.low)+' 終'+yen(b.close)+' 出来高'+yen(b.volume)+'</title></rect>';
+    var c=byT[b.t];if(c){var m=c.side==="bottom";var yy=m?y(b.low)+(c.near?16:10):y(b.high)-(c.near?8:4);
+      s+='<text x="'+x(i)+'" y="'+yy+'" text-anchor="middle" class="tf-mk '+(c.near?"tf-mk-near":"")+' '+(m?"tf-mk-b":"tf-mk-t")+'">'+(m?"▼":"▲")+'<title>'+jst(b.t)+' クライマックス('+(m?"下落":"上昇")+') 出来高 '+c.volRatio.toFixed(1)+'倍'+(c.near?" 損益分岐付近":"")+'</title></text>'}
+    if(i%Math.ceil(bars.length/6)===0)s+='<text x="'+x(i)+'" y="'+(H-6)+'" text-anchor="middle">'+jst(b.t)+'</text>'});
+  if(lv.putLevel!=null&&lv.putLevel>lo&&lv.putLevel<hi)s+='<line x1="'+P+'" x2="'+(W-10)+'" y1="'+y(lv.putLevel)+'" y2="'+y(lv.putLevel)+'" class="tf-lv"/><text x="'+(P+4)+'" y="'+(y(lv.putLevel)-3)+'" class="tf-lv-t">プット損益分岐 '+yen(lv.putLevel)+'</text>';
+  if(lv.callLevel!=null&&lv.callLevel>lo&&lv.callLevel<hi)s+='<line x1="'+P+'" x2="'+(W-10)+'" y1="'+y(lv.callLevel)+'" y2="'+y(lv.callLevel)+'" class="tf-lv"/><text x="'+(P+4)+'" y="'+(y(lv.callLevel)-3)+'" class="tf-lv-t">コール損益分岐 '+yen(lv.callLevel)+'</text>';
+  var last=bars[bars.length-1];s+='<text x="'+(W-12)+'" y="'+(y(last.close)+4)+'" text-anchor="end" class="tf-last">'+yen(last.close)+'</text>';
+  s+='</svg>';el.innerHTML=s;
+  st.textContent=d.label+" 最新 "+jst(last.t)+" "+yen(last.close)+(lv.putLevel!=null?"　プット損益分岐まで "+(((last.close-lv.putLevel)/last.close)*100).toFixed(2)+"%":"")+(lv.callLevel!=null?"　コール損益分岐まで +"+(((lv.callLevel-last.close)/last.close)*100).toFixed(2)+"%":"");
+}
+function load(){st.textContent="読み込み中…";fetch("/api/intraday?tf="+cur).then(function(r){return r.json()}).then(function(d){if(d.error){st.textContent="取得失敗: "+d.error;return}draw(d)}).catch(function(e){st.textContent="取得失敗: "+e})}
+tabs.addEventListener("click",function(e){var b=e.target.closest("button");if(!b)return;cur=b.getAttribute("data-tf");Array.prototype.forEach.call(tabs.querySelectorAll("button"),function(x){x.classList.toggle("on",x===b)});load()});
+load();timer=setInterval(load,5*60*1000);
+})();`;
+
+/** 最近のアラート */
+function alertsSection(log: AlertLogItem[]): string {
+  const items = [...log].slice(-15).reverse();
+  const jst = (t: number) => new Date(t + 9 * 3600 * 1000).toISOString().replace("T", " ").slice(5, 16);
+  const rows = items.map((x) => {
+    const kind = x.side === "bottom" ? "大底候補" : x.side === "top" ? "天井候補" : x.side === "far-up" ? "ファーOTM急騰" : "ファーOTM急落";
+    const tf = x.tf === "daily" ? "日次" : x.tf === "5m" ? "5分足" : x.tf === "15m" ? "15分足" : "60分足";
+    const body = x.text ?? `先物 ${yen(x.close)}(損益分岐 ${yen(x.level)}、出来高 ${x.volRatio.toFixed(1)}倍)`;
+    return `<tr><td>${jst(x.at)}</td><td class="${x.side === "bottom" || x.side === "far-down" ? "down" : "up"}">${kind}</td><td>${tf}</td><td>${body}</td><td>${x.sent ? "送信" : "未送信"}</td></tr>`;
+  }).join("");
+  return `<h4>最近のアラート</h4>${rows ? `<div class="table-wrap"><table><thead><tr><th>時刻(JST)</th><th>種類</th><th>時間足</th><th>内容</th><th>メール</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<p class="muted small">まだアラートはありません。大底・天井候補(出来高を伴う急落・急騰 × 売り手の損益分岐)と、ファーOTM のプット・コールの急騰・急落(前日比 2倍以上/0.5倍以下)が出るとここに載り、メールで通知します。</p>`}`;
+}
+
+export function renderDailySection(a: DailyAnalysis | undefined, history: DailyAnalysis[], strikes: DailyStrike[], squeezeHist: SqueezeHist[] = [], alertLog: AlertLogItem[] = []): string {
   if (!a) return "";
   const m = `${a.front.month.slice(0, 4)}年${Number(a.front.month.slice(4))}月限`;
   const dPcr = a.prev ? a.pcr - a.prev.pcr : null;
@@ -280,6 +344,8 @@ export function renderDailySection(a: DailyAnalysis | undefined, history: DailyA
       ${kpi("SQまでの1σレンジ", range, a.expectedMove ? `±${yen(a.expectedMove)}円` : "")}
     </div>
     <p class="comment">${esc(a.comment)}</p>
+    ${intradaySection(a)}
+    ${alertsSection(alertLog)}
     <h4>行使価格別 建玉(${esc(m)}, 500円刻み)</h4>
     ${oiChart(a, strikes)}
     ${squeezeSection(a, squeezeHist)}
@@ -300,10 +366,18 @@ svg tspan.sp-put-t{fill:var(--down)}svg tspan.sp-call-t{fill:var(--up)}.be{strok
 details.explain{margin:10px 0;padding:8px 12px;border:1px solid var(--line,#8883);border-radius:10px;font-size:13px;line-height:1.7}
 details.explain summary{cursor:pointer;font-weight:700}details.explain dt{font-weight:700;margin-top:10px}details.explain dd{margin:2px 0 0 0}
 details.explain dd p{margin:2px 0}details.explain .today{color:var(--fg);background:#8881;border-radius:6px;padding:2px 6px}
+.tf-tabs{display:flex;gap:6px;align-items:center;margin:8px 0}.tf-tabs button{border:1px solid #8886;background:transparent;color:var(--fg);padding:4px 10px;border-radius:6px;cursor:pointer;font-size:13px}.tf-tabs button.on{background:#0ea5e9;border-color:#0ea5e9;color:#fff}
+.tf-chart svg{width:100%;height:auto}.tf-vu{fill:var(--up);opacity:.35}.tf-vd{fill:var(--down);opacity:.35}.tf-lv{stroke:#eab308;stroke-dasharray:6 3;stroke-width:1.2}svg text.tf-lv-t{fill:#eab308;font-size:10px}svg text.tf-last{fill:var(--fg);font-size:11px;font-weight:700}
+svg text.tf-mk{font-size:9px}svg text.tf-mk-near{font-size:15px;font-weight:700}svg text.tf-mk-b{fill:#22c55e}svg text.tf-mk-t{fill:#ef4444}
+.ic-up{stroke:var(--up)}.ic-dn{stroke:var(--down)}.ic-up-b{fill:var(--up)}.ic-dn-b{fill:var(--down)}
 .sq-hot{color:#dc2626!important;font-weight:700}.sq-calm{color:#16a34a!important}
 .sq-wrap{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:10px 0}@media(max-width:720px){details.explain{margin:10px 0;padding:8px 12px;border:1px solid var(--line,#8883);border-radius:10px;font-size:13px;line-height:1.7}
 details.explain summary{cursor:pointer;font-weight:700}details.explain dt{font-weight:700;margin-top:10px}details.explain dd{margin:2px 0 0 0}
 details.explain dd p{margin:2px 0}details.explain .today{color:var(--fg);background:#8881;border-radius:6px;padding:2px 6px}
+.tf-tabs{display:flex;gap:6px;align-items:center;margin:8px 0}.tf-tabs button{border:1px solid #8886;background:transparent;color:var(--fg);padding:4px 10px;border-radius:6px;cursor:pointer;font-size:13px}.tf-tabs button.on{background:#0ea5e9;border-color:#0ea5e9;color:#fff}
+.tf-chart svg{width:100%;height:auto}.tf-vu{fill:var(--up);opacity:.35}.tf-vd{fill:var(--down);opacity:.35}.tf-lv{stroke:#eab308;stroke-dasharray:6 3;stroke-width:1.2}svg text.tf-lv-t{fill:#eab308;font-size:10px}svg text.tf-last{fill:var(--fg);font-size:11px;font-weight:700}
+svg text.tf-mk{font-size:9px}svg text.tf-mk-near{font-size:15px;font-weight:700}svg text.tf-mk-b{fill:#22c55e}svg text.tf-mk-t{fill:#ef4444}
+.ic-up{stroke:var(--up)}.ic-dn{stroke:var(--down)}.ic-up-b{fill:var(--up)}.ic-dn-b{fill:var(--down)}
 .sq-hot{color:#dc2626!important;font-weight:700}.sq-calm{color:#16a34a!important}
 .sq-wrap{grid-template-columns:1fr}}
 .sq-g{border:1px solid var(--line,#8883);border-radius:10px;padding:10px 12px}.sq-g-head{display:flex;align-items:baseline;gap:8px}.sq-g-head span{font-size:13px;flex:1}

@@ -8,7 +8,7 @@ interface IchimokuLatest { tradeDate: string; close: number; ichimoku: IchimokuP
 import { decodeJpx, parseWeeklyCsv } from "./jpx";
 import { analyzeAndPost, ingestDaily, ingestManual, rebuildSqueeze, runPipeline, weeklyWeights } from "./pipeline";
 import type { WeeklyReport, WeeklyWeights } from "./weekly-tuning";
-import { COOLDOWN_MIN, composeMail, detect, levelsFrom, parseIntraday, sendMail, SYMBOL, TIMEFRAMES, type AlertLogItem, type AlertState, type Signal } from "./alerts";
+import { COOLDOWN_MIN, composeMail, detect, levelsFrom, parseIntraday, scanClimax, sendMail, SYMBOL, TIMEFRAMES, type AlertLogItem, type AlertState, type Signal } from "./alerts";
 import type { SqueezeHist } from "./squeeze";
 import { DEFAULT_CONFIG, type ModelConfig, type TuningReport } from "./tuning";
 import { renderPage } from "./page";
@@ -30,13 +30,14 @@ app.get("/", async (c) => {
     loadMeta<ModelConfig>(c.env, "model_config"), loadMeta<TuningReport[]>(c.env, "model_tuning_log"),
   ]);
   const weeklyReport = await loadMeta<WeeklyReport>(c.env, "weekly_tuning");
+  const alertLog = (await loadMeta<AlertLogItem[]>(c.env, "alert_log")) ?? [];
   const ichimoku = latestIchi && (!dl?.ichimoku || latestIchi.tradeDate > dl.ichimoku.result.date)
     ? { ...latestIchi.ichimoku, basis: dl?.ichimoku?.basis ?? 0 }
     : dl?.ichimoku;
   c.header("Cache-Control", "public, max-age=300");
   return c.html(renderPage({
     latest: history[history.length - 1], history, week: weeks[0], siteUrl: c.env.SITE_URL,
-    daily: { latest: dl, history: dailyHistory, strikes, squeezeHist: squeezeHist ?? [] }, ichimoku,
+    daily: { latest: dl, history: dailyHistory, strikes, squeezeHist: squeezeHist ?? [], alertLog }, ichimoku,
     model: { prediction, recent, logs, config: modelConfig ?? DEFAULT_CONFIG, tuning: tuningLog ?? [] },
     weekly: weeklyReport ?? undefined,
     sentiment,
@@ -224,6 +225,19 @@ ${env.SITE_URL}`);
 app.get("/api/alerts/check", async (c) => {
   try { const r = await runAlerts(c.env, { send: false }); return c.json({ note: r.note, signals: r.signals.map((s) => ({ tf: s.tf, side: s.side, close: s.bar.close, level: s.level, volRatio: s.volRatio })) }); }
   catch (e) { return c.json({ error: String(e).slice(0, 300) }, 500); }
+});
+/** 先物の分足(Yahoo Finance NKD=F)+損益分岐+クライマックス判定。ページのチャート用。60 秒キャッシュ */
+app.get("/api/intraday", async (c) => {
+  const tf = (TIMEFRAMES.find((t) => t.tf === c.req.query("tf")) ?? TIMEFRAMES[0]);
+  try {
+    const r = await fetch(`https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(SYMBOL)}?interval=${tf.tf}&range=${tf.range}`, { headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36", Accept: "application/json" } });
+    if (!r.ok) return c.json({ error: `Yahoo HTTP ${r.status}` }, 502);
+    const bars = parseIntraday(await r.json()).filter((b) => b.volume > 0 || true);
+    const [dl] = (await loadDailyAnalyses(c.env, 1)).slice(-1);
+    const lv = levelsFrom(dl);
+    c.header("Cache-Control", "public, max-age=60");
+    return c.json({ symbol: SYMBOL, tf: tf.tf, label: tf.label, bars: bars.slice(-400), levels: lv, climax: scanClimax(bars, lv) });
+  } catch (e) { return c.json({ error: String(e).slice(0, 200) }, 500); }
 });
 app.get("/api/alerts", async (c) => c.json({ mail: await loadMeta<unknown>(c.env, "alert_test_sent"), state: await loadMeta<AlertState>(c.env, "alert_state"), log: ((await loadMeta<AlertLogItem[]>(c.env, "alert_log")) ?? []).slice(-20) }));
 /** 手動で判定(?send=1 で送信、?force=1 でクールダウン無視) */

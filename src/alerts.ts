@@ -128,7 +128,25 @@ ${siteUrl}
 }
 
 export interface AlertState { lastSent: Record<string, number>; lastRun?: { at: number; ok: boolean; note: string; checked: Record<string, { t: number; close: number; volRatio: number } | null> } }
-export interface AlertLogItem { at: number; tf: Tf; side: Signal["side"]; close: number; level: number; volRatio: number; sent: boolean }
+export interface AlertLogItem { at: number; tf: Tf | "daily"; side: Signal["side"] | "far-up" | "far-down"; close: number; level: number; volRatio: number; sent: boolean; text?: string }
+
+/** 期間内のすべての足についてクライマックス判定(チャートのマーカー用)。level に近いものは near=true */
+export function scanClimax(bars: IBar[], lv: Levels | null): { t: number; side: "bottom" | "top"; near: boolean; volRatio: number }[] {
+  const out: { t: number; side: "bottom" | "top"; near: boolean; volRatio: number }[] = [];
+  const done = bars.filter((b) => b.volume > 0);
+  for (let i = LOOKBACK; i < done.length; i++) {
+    const bar = done[i], prev = done.slice(i - LOOKBACK, i);
+    const avgVol = prev.reduce((s, b) => s + b.volume, 0) / prev.length, avgRange = prev.reduce((s, b) => s + (b.high - b.low), 0) / prev.length;
+    if (!(avgVol > 0) || !(avgRange > 0)) continue;
+    const range = bar.high - bar.low, volRatio = bar.volume / avgVol;
+    if (volRatio < VOL_MULT || range / avgRange < RANGE_MULT) continue;
+    const pos = (bar.close - bar.low) / (range || 1);
+    const nearLv = (level: number | null | undefined) => level != null && ((bar.low <= level && level <= bar.high) || Math.min(Math.abs(bar.low - level), Math.abs(bar.high - level), Math.abs(bar.close - level)) / bar.close <= LEVEL_PCT);
+    if (bar.close < bar.open && pos <= 0.34) out.push({ t: bar.t, side: "bottom", near: nearLv(lv?.putLevel), volRatio });
+    else if (bar.close > bar.open && pos >= 0.66) out.push({ t: bar.t, side: "top", near: nearLv(lv?.callLevel), volRatio });
+  }
+  return out;
+}
 
 /** Resend でメール送信 */
 export async function sendMail(apiKey: string, to: string, subject: string, text: string): Promise<{ ok: boolean; status: number; body: string }> {

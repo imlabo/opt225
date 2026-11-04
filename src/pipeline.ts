@@ -9,7 +9,7 @@ import { hasWeek, loadHistory, logPost, saveAnalysis, saveWeek, wasPosted } from
 import { discoverLatestFiles, fetchWeek, weekFromFileName } from "./jpx";
 import type { Env, WeekData } from "./types";
 import { squeezeRaw, squeezeScore, upsertHist, type SqueezeHist } from "./squeeze";
-import { composeFarMail, farQuotes, farSignals, sendMail } from "./alerts";
+import { composeFarMail, farQuotes, farSignals, sendMail, type AlertLogItem } from "./alerts";
 import { composeTweet, postTweet } from "./x";
 
 export interface RunResult {
@@ -108,10 +108,13 @@ export async function ingestDaily(env: Env, d: DailyInput, forcePost = false) {
     const prevRows = prev ? await loadDailyStrikes(env, prev.tradeDate, a.front.month) : [];
     a.far = farQuotes(rows, prevRows, a.spot);
     const sig = farSignals(a.far);
-    if (sig.length && env.RESEND_API_KEY && env.ALERT_TO && !(await loadMeta<string[]>(env, "far_alerted"))?.includes(a.tradeDate)) {
+    if (sig.length && !(await loadMeta<string[]>(env, "far_alerted"))?.includes(a.tradeDate)) {
       const m = composeFarMail(sig, a.tradeDate, a.spot, a.front.month, env.SITE_URL);
-      const r = await sendMail(env.RESEND_API_KEY, env.ALERT_TO, m.subject, m.text);
-      if (r.ok) await saveMeta(env, "far_alerted", [...((await loadMeta<string[]>(env, "far_alerted")) ?? []), a.tradeDate].slice(-30));
+      let ok = false;
+      if (env.RESEND_API_KEY && env.ALERT_TO) ok = (await sendMail(env.RESEND_API_KEY, env.ALERT_TO, m.subject, m.text)).ok;
+      await saveMeta(env, "far_alerted", [...((await loadMeta<string[]>(env, "far_alerted")) ?? []), a.tradeDate].slice(-30));
+      const log = (await loadMeta<AlertLogItem[]>(env, "alert_log")) ?? [];
+      await saveMeta(env, "alert_log", [...log, ...sig.map((x) => ({ at: Date.now(), tf: "daily" as const, side: (x.ratio! >= 1 ? "far-up" : "far-down") as AlertLogItem["side"], close: x.px, level: x.strike, volRatio: x.ratio!, sent: ok, text: `${x.side === "put" ? "プット" : "コール"} ${x.strike.toLocaleString("ja-JP")} ${x.prevPx!.toLocaleString("ja-JP")}→${x.px.toLocaleString("ja-JP")}円(${x.ratio!.toFixed(1)}倍)` }))].slice(-100));
     }
   } catch (e) { console.log(`far: ${e}`); }
   await saveDaily(env, d, a);

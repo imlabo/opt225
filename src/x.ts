@@ -78,7 +78,7 @@ export function weightedLength(text: string): number {
 
 const sign = (n: number) => (n > 0 ? "+" : "") + n.toLocaleString("ja-JP");
 
-export function composeTweet(a: Analysis, siteUrl: string): string {
+export function composeTweet(a: Analysis, _siteUrl: string): string {
   const ind = a.investors.find((i) => i.investor === "individual")!;
   const corp = a.investors.find((i) => i.investor === "corporate")!;
   const lines = [
@@ -89,7 +89,6 @@ export function composeTweet(a: Analysis, siteUrl: string): string {
     `ボラ: ${a.volSignal}`,
     "※機械的推計・投資助言ではありません",
     "#日経平均 #日経225オプション",
-    siteUrl,
   ];
   let text = lines.join("\n");
   // 念のため上限超過時はハッシュタグから削る
@@ -101,7 +100,7 @@ const yen = (n: number) => Math.round(n).toLocaleString("ja-JP");
 
 export interface LastResult { tradeDate: string; call: "up" | "down" | "flat"; up: boolean; change: number }
 
-export function composeDailyTweet(a: DailyAnalysis, siteUrl: string, p?: Prediction, last?: LastResult, fg?: { nikkei?: number | null; cnn?: number | null }): string {
+export function composeDailyTweet(a: DailyAnalysis, _siteUrl: string, p?: Prediction, last?: LastResult, fg?: { nikkei?: number | null; cnn?: number | null }): string {
   const callLabel = (c: string) => (c === "up" ? "買い" : c === "down" ? "売り" : "様子見");
   const m = `${Number(a.front.month.slice(4))}月限`;
   const lines = [
@@ -116,7 +115,6 @@ export function composeDailyTweet(a: DailyAnalysis, siteUrl: string, p?: Predict
     last && last.call !== "flat" ? `前回: ${callLabel(last.call)}→${last.up ? "上昇" : "下落"}${(last.call === "up") === last.up ? "◯" : "×"}` : "",
     "※機械的推計・投資助言ではありません",
     "#日経225オプション",
-    siteUrl,
   ].filter(Boolean);
   let text = lines.join("\n");
   if (weightedLength(text) > 280) text = lines.filter((l) => !l.startsWith("#")).join("\n");
@@ -124,7 +122,7 @@ export function composeDailyTweet(a: DailyAnalysis, siteUrl: string, p?: Predict
 }
 
 /** 天井・大底候補アラートの投稿文 */
-export function composeAlertTweet(sig: { tf: string; label: string; side: "bottom" | "top"; bar: { t: number; close: number; volume: number }; volRatio: number; level: number; crossed: boolean; distPct: number; inProgress: boolean }[], siteUrl: string): string {
+export function composeAlertTweet(sig: { tf: string; label: string; side: "bottom" | "top"; bar: { t: number; close: number; volume: number }; volRatio: number; level: number; crossed: boolean; distPct: number; inProgress: boolean }[], _siteUrl: string): string {
   const s0 = sig[0];
   const jst = (t: number) => { const d = new Date(t * 1000 + 9 * 3600 * 1000); return `${d.getUTCMonth() + 1}/${d.getUTCDate()} ${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`; };
   const lines = [
@@ -133,7 +131,6 @@ export function composeAlertTweet(sig: { tf: string; label: string; side: "botto
     `${s0.side === "bottom" ? "プット" : "コール"}売り手の損益分岐 ${yen(s0.level)}${s0.crossed ? "をまたぐ" : `まで${(s0.distPct * 100).toFixed(1)}%`}`,
     "※機械的検出・投資助言ではありません",
     "#日経225先物",
-    siteUrl,
   ];
   let text = lines.join("\n");
   if (weightedLength(text) > 280) text = lines.filter((l) => !l.startsWith("#")).join("\n");
@@ -141,13 +138,12 @@ export function composeAlertTweet(sig: { tf: string; label: string; side: "botto
 }
 
 /** ファーOTM 急騰・急落の投稿文 */
-export function composeFarTweet(sig: { side: "put" | "call"; pct: number; strike: number; px: number; prevPx: number | null; ratio: number | null }[], tradeDate: string, siteUrl: string): string {
+export function composeFarTweet(sig: { side: "put" | "call"; pct: number; strike: number; px: number; prevPx: number | null; ratio: number | null }[], tradeDate: string, _siteUrl: string): string {
   const lines = [
     `【ファーOTM ${sig.some((x) => x.ratio! >= 1) ? "急騰" : "急落"} ${tradeDate.slice(5).replace("-", "/")}】`,
     ...sig.slice(0, 3).map((x) => `${x.side === "put" ? "P" : "C"}${yen(x.strike)}(${Math.round(x.pct * 100)}%${x.side === "put" ? "下" : "上"}) ${yen(x.prevPx!)}→${yen(x.px)}円 ${x.ratio!.toFixed(1)}倍`),
     "※JPX清算値段・投資助言ではありません",
     "#日経225オプション",
-    siteUrl,
   ];
   let text = lines.join("\n");
   if (weightedLength(text) > 280) text = lines.filter((l) => !l.startsWith("#")).join("\n");

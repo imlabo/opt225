@@ -110,6 +110,11 @@ CSV(約4MB)と Excel の解析は Workers 無料枠の CPU 時間(10ms)に収ま
 5. 買い戻しの痕跡: 踏まれる方向に動いた日の、現値 ±1σ の建玉の減少率
 履歴が 60 営業日たまるまでは固定の目安(50+50·tanh)で、以後は過去 250 日の中でのパーセンタイルで点数化。履歴は `fg_meta` の `squeeze_hist` に保存し、デプロイ時に `POST /admin/rebuild-squeeze` で保存済み日次データから作り直す。公開 API: `GET /api/squeeze`
 
+## 天井・大底候補アラート (`src/alerts.ts`)
+Worker の Cron(5 分ごと)で日経225先物(CME NKD=F, Yahoo Finance)の 5分足・15分足・60分足を取得し、直近の確定足が「出来高 ≥ 直近20本平均の 2 倍、値幅 ≥ 平均の 1.5 倍、安値引け(高値引け)」で、かつプット売り手(コール売り手)の損益分岐(先物換算)から 0.8% 以内またはまたいだときに、大底候補(天井候補)としてメール通知(Resend)。同じ時間足・向きは 120 分あける。
+- Secret `RESEND_API_KEY`(Resend の API キー。無料枠・ドメイン未設定でも自分のアカウントのメールアドレス宛なら `onboarding@resend.dev` から送れる)、Variable/var `ALERT_TO`(送り先)
+- `GET /api/alerts`(最終チェックの状態と直近のアラート)、`POST /admin/alert-check?send=1&force=1`(手動判定)、`POST /admin/alert-test`(テストメール)
+
 ## 一目均衡表(日足) (`src/ichimoku.ts`)
 **日経225先物の日足**で計算する。大阪取引所の先物日足は無料の公開データがないため、CME の円建て日経225先物(継続足 `NIY=F`, Yahoo Finance チャート API, `src/yahoo.ts`)を使う。CME の取引日 D は前日 17:00 CT〜D 16:00 CT(JST で D 朝〜翌朝)で、大阪の D 日中+ナイトセッションにほぼ相当。夕方の実行時点では最後の足は取引中(暫定)で、表示に明記する。現物換算はベーシス(大阪先物清算価格−日経平均)を引いて表示。
 先物が取れないときは日経平均(日経公式 CSV、最新足は `^N225` を Yahoo で補完)で代替。JPX の日次ファイルが未公表の時間帯でも一目均衡表だけ先に更新する(`POST /admin/ingest-ichimoku`)。

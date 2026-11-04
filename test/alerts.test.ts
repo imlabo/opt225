@@ -1,0 +1,39 @@
+import { describe, expect, it } from "vitest";
+import { composeMail, detect, levelsFrom, parseIntraday, type IBar, type Levels } from "../src/alerts";
+
+const mk = (n: number, base = 64000): IBar[] => Array.from({ length: n }, (_, i) => ({ t: 1_700_000_000 + i * 300, open: base, high: base + 40, low: base - 40, close: base + (i % 2 ? 10 : -10), volume: 1000 }));
+const lv: Levels = { tradeDate: "2026-11-02", basis: 200, putBreakeven: 61506, callBreakeven: 65981, putLevel: 61706, callLevel: 66181 };
+
+describe("alerts", () => {
+  it("parses intraday bars with volume", () => {
+    const j = { chart: { result: [{ timestamp: [1, 2], indicators: { quote: [{ open: [1, 2], high: [2, 3], low: [0.5, 1], close: [1.5, 2.5], volume: [10, null] }] } }] } };
+    const b = parseIntraday(j);
+    expect(b.length).toBe(2); expect(b[0].volume).toBe(10); expect(b[1].volume).toBe(0);
+  });
+  it("converts breakevens to futures levels", () => {
+    const l = levelsFrom({ tradeDate: "d", spot: 63000, fut: { month: "202612", price: 63200 }, seller: { putBreakeven: 61506, callBreakeven: 65981 } } as never)!;
+    expect(l.putLevel).toBe(61706); expect(l.basis).toBe(200);
+  });
+  it("flags a high-volume wide down bar near the put sellers' breakeven as a bottom candidate", () => {
+    const bars = mk(30, 62100);
+    const climax: IBar = { t: bars[28].t + 300, open: 62100, high: 62110, low: 61650, close: 61700, volume: 3000 }; // 値幅 460 = 平均 80 の 5.7 倍、出来高 3 倍
+    bars[29] = climax;
+    bars.push({ t: climax.t + 300, open: 61700, high: 61750, low: 61690, close: 61720, volume: 100 }); // 進行中の足
+    const now = (climax.t + 300 + 60) * 1000;
+    const d = detect("5m", "5分足", bars, lv, now);
+    expect(d.signal?.side).toBe("bottom");
+    expect(d.signal?.crossed).toBe(true);
+    expect(d.signal?.volRatio).toBeCloseTo(3, 6);
+    const m = composeMail([d.signal!], lv, "https://x");
+    expect(m.subject).toContain("大底候補");
+    expect(m.text).toContain("61,706");
+    // 損益分岐から遠ければ出さない
+    expect(detect("5m", "5分足", mk(30, 64000).map((b, i) => (i === 29 ? { ...b, open: 64100, high: 64110, low: 63650, close: 63700, volume: 3000 } : b)), lv, now).signal).toBeNull();
+  });
+  it("flags a high-volume up bar near the call sellers' breakeven as a top candidate", () => {
+    const bars = mk(30, 65800);
+    bars[29] = { t: bars[28].t + 300, open: 65800, high: 66250, low: 65790, close: 66200, volume: 2500 };
+    const d = detect("15m", "15分足", bars, lv, (bars[29].t + 15 * 60 + 5) * 1000);
+    expect(d.signal?.side).toBe("top");
+  });
+});

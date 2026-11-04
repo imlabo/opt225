@@ -8,6 +8,7 @@ interface IchimokuLatest { tradeDate: string; close: number; ichimoku: IchimokuP
 import { decodeJpx, parseWeeklyCsv } from "./jpx";
 import { analyzeAndPost, ingestDaily, ingestManual, rebuildSqueeze, runPipeline, weeklyWeights } from "./pipeline";
 import type { WeeklyReport, WeeklyWeights } from "./weekly-tuning";
+import { COOLDOWN_MIN, composeMail, detect, levelsFrom, parseIntraday, sendMail, SYMBOL, TIMEFRAMES, type AlertLogItem, type AlertState, type Signal } from "./alerts";
 import type { SqueezeHist } from "./squeeze";
 import { DEFAULT_CONFIG, type ModelConfig, type TuningReport } from "./tuning";
 import { renderPage } from "./page";
@@ -169,6 +170,59 @@ app.post("/admin/clear-sample", async (c) => {
   return c.json({ ok: true });
 });
 
+/** 天井・大底候補アラート: 先物の 5分/15分/60分足を取得して判定し、該当があればメール */
+async function runAlerts(env: Env, opts: { send?: boolean; force?: boolean } = {}): Promise<{ signals: Signal[]; sent?: boolean; note: string; mail?: unknown }> {
+  const send = opts.send ?? true;
+  const state = (await loadMeta<AlertState>(env, "alert_state")) ?? { lastSent: {} };
+  const [dl] = (await loadDailyAnalyses(env, 1)).slice(-1);
+  const lv = levelsFrom(dl);
+  const checked: NonNullable<AlertState["lastRun"]>["checked"] = {};
+  const signals: Signal[] = [];
+  let note = "";
+  if (!lv) note = "no daily analysis";
+  else {
+    for (const { tf, label, range } of TIMEFRAMES) {
+      try {
+        const u = `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(SYMBOL)}?interval=${tf}&range=${range}`;
+        const r = await fetch(u, { headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36", Accept: "application/json" } });
+        if (!r.ok) { note += `${tf}: HTTP ${r.status}; `; checked[tf] = null; continue; }
+        const bars = parseIntraday(await r.json());
+        const d = detect(tf, label, bars, lv);
+        checked[tf] = d.checked && { t: d.checked.t, close: d.checked.close, volRatio: 0 };
+        if (d.signal) signals.push(d.signal);
+      } catch (e) { note += `${tf}: ${String(e).slice(0, 80)}; `; checked[tf] = null; }
+    }
+  }
+  // 同じ時間足・向きは COOLDOWN_MIN 分あける
+  const now = Date.now();
+  const fresh = signals.filter((s) => opts.force || now - (state.lastSent[`${s.tf}:${s.side}`] ?? 0) > COOLDOWN_MIN * 60 * 1000);
+  let sent: boolean | undefined, mail: unknown;
+  if (fresh.length && send && lv) {
+    if (!env.RESEND_API_KEY || !env.ALERT_TO) { note += "RESEND_API_KEY/ALERT_TO not set; "; sent = false; }
+    else {
+      const m = composeMail(fresh, lv, env.SITE_URL);
+      mail = await sendMail(env.RESEND_API_KEY, env.ALERT_TO, m.subject, m.text);
+      sent = (mail as { ok: boolean }).ok;
+      if (sent) for (const s of fresh) state.lastSent[`${s.tf}:${s.side}`] = now;
+    }
+    const log = (await loadMeta<AlertLogItem[]>(env, "alert_log")) ?? [];
+    await saveMeta(env, "alert_log", [...log, ...fresh.map((s) => ({ at: now, tf: s.tf, side: s.side, close: s.bar.close, level: s.level, volRatio: s.volRatio, sent: !!sent }))].slice(-100));
+  }
+  state.lastRun = { at: now, ok: !note, note: note || `ok (${signals.length} signal${signals.length === 1 ? "" : "s"})`, checked };
+  await saveMeta(env, "alert_state", state);
+  return { signals: fresh, sent, note: state.lastRun.note, mail };
+}
+
+app.get("/api/alerts", async (c) => c.json({ state: await loadMeta<AlertState>(c.env, "alert_state"), log: ((await loadMeta<AlertLogItem[]>(c.env, "alert_log")) ?? []).slice(-20) }));
+/** 手動で判定(?send=1 で送信、?force=1 でクールダウン無視) */
+app.post("/admin/alert-check", async (c) => c.json(await runAlerts(c.env, { send: c.req.query("send") === "1", force: c.req.query("force") === "1" })));
+/** テストメール */
+app.post("/admin/alert-test", async (c) => {
+  if (!c.env.RESEND_API_KEY || !c.env.ALERT_TO) return c.json({ error: "RESEND_API_KEY / ALERT_TO not set" }, 400);
+  return c.json(await sendMail(c.env.RESEND_API_KEY, c.env.ALERT_TO, "【opt225】テストメール", `アラートの送信テストです。
+${c.env.SITE_URL}`));
+});
+
 /** GitHub Actions の daily ワークフローを workflow_dispatch(mode=wait)で起動 */
 async function dispatchDaily(env: Env): Promise<{ dispatched: boolean; status?: number; reason?: string }> {
   if (!env.GH_DISPATCH_TOKEN) return { dispatched: false, reason: "GH_DISPATCH_TOKEN not set" };
@@ -189,6 +243,7 @@ export default {
   async scheduled(ctrl: ScheduledController, env: Env, ctx: ExecutionContext) {
     // 週次(木・金 16:30 JST)は JPX 取得→分析→投稿。平日の引け後は GitHub Actions の日次取り込み(待機ループ)を起動
     if (ctrl.cron === "30 7 * * 4,5") ctx.waitUntil(runPipeline(env).then((r) => console.log(JSON.stringify(r))));
+    else if (ctrl.cron === "*/5 * * * 1-6") ctx.waitUntil(runAlerts(env).then((r) => console.log(JSON.stringify({ alerts: r.signals.length, sent: r.sent, note: r.note }))));
     else ctx.waitUntil(dispatchDaily(env).then((r) => console.log(JSON.stringify(r))));
   },
 } satisfies ExportedHandler<Env>;

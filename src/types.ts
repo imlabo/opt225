@@ -39,4 +39,6 @@ export interface Env {
   X_ACCESS_SECRET?: string;
   GH_DISPATCH_TOKEN?: string; // GitHub の fine-grained PAT(Actions: Read and write)。引け後に daily ワークフローを起動するため
   GH_REPO?: string; // 既定 imlabo/opt225
+  RESEND_API_KEY?: string; // 天井・大底候補アラートのメール送信(Resend)
+  ALERT_TO?: string; // 送り先メールアドレス
 }

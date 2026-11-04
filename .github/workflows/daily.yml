@@ -11,11 +11,9 @@ name: Daily ingest
 # 手動実行(workflow_dispatch)は既定で 1 回だけ取得する。
 on:
   schedule:
-    - cron: "50 6 * * 1-5"  # 15:50 JST(本命)
-    - cron: "40 7 * * 1-5"  # 16:40 JST(予備)
-    - cron: "40 8 * * 1-5"  # 17:40 JST(予備)
-    - cron: "10 10 * * 1-5" # 19:10 JST(予備)
-    - cron: "10 12 * * 1-5" # 21:10 JST(予備)
+    - cron: "40 7 * * 1-5"  # 16:40 JST(予備。本命は Worker の Cron)
+    - cron: "10 11 * * 1-5" # 20:10 JST(予備)
+    - cron: "10 13 * * 1-5" # 22:10 JST(予備)
   workflow_dispatch:
     inputs:
       mode:

@@ -267,7 +267,7 @@ app.post("/admin/dispatch-daily", async (c) => c.json(await dispatchDaily(c.env)
 export default {
   fetch: app.fetch,
   async scheduled(ctrl: ScheduledController, env: Env, ctx: ExecutionContext) {
-    // 週次(木・金 16:30 JST)は JPX 取得→分析→投稿。5 分ごとはアラート。それ以外(平日 15:50 / 18:00 JST)は GitHub Actions の日次取り込みを起動
+    // 週次(木・金 16:30 JST)は JPX 取得→分析→投稿。毎分はアラート。それ以外(平日 16:40 / 20:10 JST)は GitHub Actions の日次取り込みを起動
     const cron = ctrl.cron ?? "";
     const kind = /^\*(\/5)?\s/.test(cron) ? "alerts" : /^30 7\b/.test(cron) ? "weekly" : "dispatch";
     ctx.waitUntil((async () => {

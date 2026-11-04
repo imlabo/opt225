@@ -65,7 +65,7 @@ curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" "https://<site>/admin/run"
 
 CSV(約4MB)と Excel の解析は Workers 無料枠の CPU 時間(10ms)に収まらないため、`.github/workflows/daily.yml` で `scripts/daily-fetch.mts` が解析し、必要な行だけを `POST /admin/ingest-daily` に送ります。
 
-**更新タイミング**: 平日 15:50 JST に Cloudflare Worker の Cron が GitHub Actions の daily ワークフローを `workflow_dispatch`(mode=wait)で起動し(GitHub のスケジュール実行は数時間遅れることがあるため。18:00 JST にも予備で起動)、`scripts/wait-and-fetch.mts` が、まず 1 回実行(一目均衡表を先行更新)した後、JPX の一覧ページを 2 分ごとに確認して、当日分の建玉 xlsx と清算値段 CSV がそろった時点で即取り込みます。サイトの最新日次が当日になったら終了、23:45 JST を過ぎたら終了(祝日)。GitHub のスケジュール遅延・欠落に備えて 16:40 / 17:40 / 19:10 / 21:10 JST にも起動(取り込み済みなら即終了)。手動実行は `mode=once`(既定)で 1 回、`mode=wait` で待機ループ。Worker 側で D1 保存・分析・表示・X 投稿(1日1回)を行います。
+**更新タイミング**: JPX の掲載予定時刻は清算値段 16:45 JST、建玉残高表 20:00 JST。平日 16:40 JST に Cloudflare Worker の Cron が GitHub Actions の daily ワークフローを `workflow_dispatch`(mode=wait)で起動し(GitHub のスケジュール実行は数時間遅れることがあるため。20:10 JST にも予備で起動)、`scripts/wait-and-fetch.mts` が、まず 1 回実行(一目均衡表を先行更新)した後、JPX の一覧ページを 2 分ごとに確認して、当日分の建玉 xlsx と清算値段 CSV がそろった時点で即取り込みます。サイトの最新日次が当日になったら終了、23:45 JST を過ぎたら終了(祝日)。GitHub のスケジュール遅延・欠落に備えて 16:40 / 17:40 / 19:10 / 21:10 JST にも起動(取り込み済みなら即終了)。手動実行は `mode=once`(既定)で 1 回、`mode=wait` で待機ループ。Worker 側で D1 保存・分析・表示・X 投稿(1日1回)を行います。
 
 公開 API: `GET /api/daily/latest`, `GET /api/daily/history`
 

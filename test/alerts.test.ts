@@ -66,3 +66,13 @@ describe("far OTM", () => {
     expect(sig.filter((x) => x.side === "call").every((x) => x.ratio === 0.5)).toBe(true);
   });
 });
+
+describe("x posts", () => {
+  it("composes alert and far tweets within the length limit", async () => {
+    const { composeAlertTweet, composeFarTweet, weightedLength } = await import("../src/x");
+    const t = composeAlertTweet([{ tf: "5m", label: "5分足", side: "bottom", bar: { t: 1793771700, close: 61380, volume: 951 }, volRatio: 3.2, level: 61684, crossed: true, distPct: 0, inProgress: true }], "https://opt225.imlabosns.workers.dev");
+    expect(t).toContain("大底候補(速報)"); expect(weightedLength(t)).toBeLessThanOrEqual(280);
+    const f = composeFarTweet([{ side: "put", pct: 0.07, strike: 59000, px: 120, prevPx: 50, ratio: 2.4 }], "2026-11-04", "https://opt225.imlabosns.workers.dev");
+    expect(f).toContain("急騰"); expect(weightedLength(f)).toBeLessThanOrEqual(280);
+  });
+});

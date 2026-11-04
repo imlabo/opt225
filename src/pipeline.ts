@@ -2,7 +2,7 @@ import { analyzeDaily, type DailyAnalysis, type DailyInput } from "./daily";
 import { evaluatePending, loadAnalyses, loadMeta, saveMeta, loadSentiment, loadDailyAnalyses, loadDailyStrikes, loadEvaluated, logDailyPost, saveDaily, saveModelLog, savePrediction, wasDailyPosted } from "./db";
 import { calibrateK, features, fit, ichiMetrics, makePrediction, metrics, PRIOR, sqFeatures, type Features, type Prediction } from "./model";
 import { configLabel, DEFAULT_CONFIG, mask, type ModelConfig } from "./tuning";
-import { composeDailyTweet } from "./x";
+import { composeDailyTweet, composeFarTweet } from "./x";
 import { analyze, WEIGHTS } from "./analysis";
 import type { WeeklyWeights } from "./weekly-tuning";
 import { hasWeek, loadHistory, logPost, saveAnalysis, saveWeek, wasPosted } from "./db";
@@ -112,6 +112,7 @@ export async function ingestDaily(env: Env, d: DailyInput, forcePost = false) {
       const m = composeFarMail(sig, a.tradeDate, a.spot, a.front.month, env.SITE_URL);
       let ok = false;
       if (env.RESEND_API_KEY && env.ALERT_TO) ok = (await sendMail(env.RESEND_API_KEY, env.ALERT_TO, m.subject, m.text)).ok;
+      await tryTweet(env, composeFarTweet(sig, a.tradeDate, env.SITE_URL));
       await saveMeta(env, "far_alerted", [...((await loadMeta<string[]>(env, "far_alerted")) ?? []), a.tradeDate].slice(-30));
       const log = (await loadMeta<AlertLogItem[]>(env, "alert_log")) ?? [];
       await saveMeta(env, "alert_log", [...log, ...sig.map((x) => ({ at: Date.now(), tf: "daily" as const, side: (x.ratio! >= 1 ? "far-up" : "far-down") as AlertLogItem["side"], close: x.px, level: x.strike, volRatio: x.ratio!, sent: ok, text: `${x.side === "put" ? "プット" : "コール"} ${x.strike.toLocaleString("ja-JP")} ${x.prevPx!.toLocaleString("ja-JP")}→${x.px.toLocaleString("ja-JP")}円(${x.ratio!.toFixed(1)}倍)` }))].slice(-100));
@@ -177,6 +178,13 @@ export async function learnAndPredict(env: Env, a: DailyAnalysis) {
     ? { tradeDate: last.tradeDate, call: last.call, up: last.actualSpot > last.spot, change: last.actualSpot - last.spot }
     : undefined;
   return { prediction, metrics: m, weights, prior, k, evaluatedNow, lastResult, fg: fgSet };
+}
+
+/** X 投稿が有効なら投稿して tweet id を返す。無効・失敗は null */
+export async function tryTweet(env: Env, text: string): Promise<string | null> {
+  const creds = xCreds(env);
+  if (env.X_POST_ENABLED !== "true" || !creds) return null;
+  try { return await postTweet(text, creds); } catch (e) { console.log(`tweet failed: ${String(e).slice(0, 200)}`); return null; }
 }
 
 function xCreds(env: Env) {

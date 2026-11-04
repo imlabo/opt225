@@ -46,7 +46,7 @@ JPX「投資部門別取引状況」週次 CSV `Tousi_DV_W_YYYYMMDD_YYYYMMDD.csv
 | Secret | `X_ACCESS_TOKEN` / `X_ACCESS_SECRET` | 投稿アカウントの Access Token / Secret(Read and Write) |
 | Secret | `GH_DISPATCH_TOKEN` | GitHub の fine-grained personal access token(このリポジトリのみ、Permissions: Actions = Read and write)。Worker の Cron が引け後に daily ワークフローを起動するのに使う |
 | Variable | `SITE_URL` | 公開 URL(投稿文に載る) |
-| Variable | `X_POST_ENABLED` | `true` で実投稿。未設定・`false` の間は `posts` に `dry_run` として記録のみ |
+| Variable | `X_POST_ENABLED` | `true` で実投稿(週次サマリー・日次サマリー・天井/大底候補アラート・ファーOTM 急騰急落)。未設定・`false` の間は `posts` に `dry_run` として記録のみ |
 
 デプロイ後、Cron(木・金 16:30 JST)が自動で取得・分析・投稿します。すぐに初回データを入れる場合:
 ```bash

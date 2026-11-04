@@ -6,7 +6,8 @@ import type { DailyInput, IchimokuPayload } from "./daily";
 /** /admin/ingest-ichimoku のボディ・fg_meta "ichimoku_latest" の中身 */
 interface IchimokuLatest { tradeDate: string; close: number; ichimoku: IchimokuPayload }
 import { decodeJpx, parseWeeklyCsv } from "./jpx";
-import { analyzeAndPost, ingestDaily, ingestManual, rebuildSqueeze, runPipeline, weeklyWeights } from "./pipeline";
+import { analyzeAndPost, ingestDaily, ingestManual, rebuildSqueeze, runPipeline, tryTweet, weeklyWeights } from "./pipeline";
+import { composeAlertTweet } from "./x";
 import type { WeeklyReport, WeeklyWeights } from "./weekly-tuning";
 import { COOLDOWN_MIN, composeMail, detect, levelsFrom, parseIntraday, scanClimax, sendMail, SYMBOL, TIMEFRAMES, type AlertLogItem, type AlertState, type Signal } from "./alerts";
 import type { SqueezeHist } from "./squeeze";
@@ -211,8 +212,9 @@ ${env.SITE_URL}`);
       const m = composeMail(fresh, lv, env.SITE_URL);
       mail = await sendMail(env.RESEND_API_KEY, env.ALERT_TO, m.subject, m.text);
       sent = (mail as { ok: boolean }).ok;
-      if (sent) for (const s of fresh) state.lastSent[`${s.tf}:${s.side}`] = now;
     }
+    const tweetId = await tryTweet(env, composeAlertTweet(fresh, env.SITE_URL));
+    if (sent || tweetId) for (const s of fresh) state.lastSent[`${s.tf}:${s.side}`] = now;
     const log = (await loadMeta<AlertLogItem[]>(env, "alert_log")) ?? [];
     await saveMeta(env, "alert_log", [...log, ...fresh.map((s) => ({ at: now, tf: s.tf, side: s.side, close: s.bar.close, level: s.level, volRatio: s.volRatio, sent: !!sent }))].slice(-100));
   }

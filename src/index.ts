@@ -269,7 +269,7 @@ export default {
   async scheduled(ctrl: ScheduledController, env: Env, ctx: ExecutionContext) {
     // 週次(木・金 16:30 JST)は JPX 取得→分析→投稿。5 分ごとはアラート。それ以外(平日 15:50 / 18:00 JST)は GitHub Actions の日次取り込みを起動
     const cron = ctrl.cron ?? "";
-    const kind = /^\*\/5\b/.test(cron) ? "alerts" : /^30 7\b/.test(cron) ? "weekly" : "dispatch";
+    const kind = /^\*(\/5)?\s/.test(cron) ? "alerts" : /^30 7\b/.test(cron) ? "weekly" : "dispatch";
     ctx.waitUntil((async () => {
       const log = (await loadMeta<{ cron: string; kind: string; at: number; result?: string }[]>(env, "cron_log")) ?? [];
       let result = "";

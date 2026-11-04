@@ -18,10 +18,10 @@ describe("alerts", () => {
     const bars = mk(30, 62100);
     const climax: IBar = { t: bars[28].t + 300, open: 62100, high: 62110, low: 61650, close: 61700, volume: 3000 }; // 値幅 460 = 平均 80 の 5.7 倍、出来高 3 倍
     bars[29] = climax;
-    bars.push({ t: climax.t + 300, open: 61700, high: 61750, low: 61690, close: 61720, volume: 100 }); // 進行中の足
-    const now = (climax.t + 300 + 60) * 1000;
+    const now = (climax.t + 300 + 60) * 1000; // クライマックス足の確定直後
     const d = detect("5m", "5分足", bars, lv, now);
     expect(d.signal?.side).toBe("bottom");
+    expect(d.signal?.inProgress).toBe(false);
     expect(d.signal?.crossed).toBe(true);
     expect(d.signal?.volRatio).toBeCloseTo(3, 6);
     const m = composeMail([d.signal!], lv, "https://x");
@@ -29,6 +29,22 @@ describe("alerts", () => {
     expect(m.text).toContain("61,706");
     // 損益分岐から遠ければ出さない
     expect(detect("5m", "5分足", mk(30, 64000).map((b, i) => (i === 29 ? { ...b, open: 64100, high: 64110, low: 63650, close: 63700, volume: 3000 } : b)), lv, now).signal).toBeNull();
+  });
+  it("fires early on an in-progress bar and ignores stale bars", () => {
+    const bars = mk(30, 62100);
+    const t = bars[29].t;
+    // 進行中(2分経過 = 40%)で出来高 1,500(按分後 3.75倍)、値幅 460
+    bars[29] = { t, open: 62100, high: 62110, low: 61650, close: 61700, volume: 1500 };
+    const d = detect("5m", "5分足", bars, lv, (t + 120) * 1000);
+    expect(d.signal?.side).toBe("bottom");
+    expect(d.signal?.inProgress).toBe(true);
+    expect(d.signal?.elapsed).toBeCloseTo(0.4, 6);
+    // 経過 30% 未満は判定しない
+    expect(detect("5m", "5分足", bars, lv, (t + 30) * 1000).signal).toBeNull();
+    // 最後の足が 2 本分より古ければ判定しない(出来高未反映など)
+    expect(detect("5m", "5分足", bars, lv, (t + 15 * 60) * 1000).signal).toBeNull();
+    const m = composeMail([d.signal!], lv, "https://x");
+    expect(m.subject).toContain("速報");
   });
   it("flags a high-volume up bar near the call sellers' breakeven as a top candidate", () => {
     const bars = mk(30, 65800);

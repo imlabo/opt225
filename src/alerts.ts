@@ -64,24 +64,35 @@ export interface Signal {
   volRatio: number; rangeRatio: number;
   level: number; distPct: number; crossed: boolean;
   stats: { avgVol: number; avgRange: number };
+  inProgress: boolean; elapsed: number; // 進行中の足での速報か(経過割合)
 }
 
-/** 直近の確定足(最後の足は進行中なので除く)でクライマックスと水準接近を判定 */
+export const MAX_AGE_TF = 2; // 最後の足がこの倍率 × 時間足より古ければ(データ遅延・取引停止)判定しない
+export const MIN_ELAPSED = 0.3; // 進行中の足は、時間足の 30% 以上経過してから判定
+
+/**
+ * 最新の足でクライマックスと水準接近を判定。
+ * 最後の足が進行中なら経過時間で按分して「速報」として判定(出来高は経過割合で、値幅はその平方根で割る)。
+ * 最後の足が古すぎる(出来高が未反映など)場合は判定しない(何時間も前の足を今さら通知しない)。
+ */
 export function detect(tf: Tf, label: string, bars: IBar[], lv: Levels, now = Date.now()): { signal: Signal | null; checked: IBar | null } {
   const done = bars.filter((b) => b.volume > 0);
   if (done.length < LOOKBACK + 2) return { signal: null, checked: null };
-  // 最後の足はまだ進行中とみなす(足の開始から tf 分経っていなければ)
-  const tfMin = tf === "5m" ? 5 : tf === "15m" ? 15 : 60;
-  const last = done[done.length - 1];
-  const idx = now - last.t * 1000 >= tfMin * 60 * 1000 ? done.length - 1 : done.length - 2;
+  const tfMs = (tf === "5m" ? 5 : tf === "15m" ? 15 : 60) * 60 * 1000;
+  const idx = done.length - 1;
   const bar = done[idx];
+  const age = now - bar.t * 1000;
+  if (age > MAX_AGE_TF * tfMs) return { signal: null, checked: bar };
+  const inProgress = age < tfMs;
+  const elapsed = inProgress ? Math.max(0, Math.min(1, age / tfMs)) : 1;
+  if (inProgress && elapsed < MIN_ELAPSED) return { signal: null, checked: bar };
   const prev = done.slice(Math.max(0, idx - LOOKBACK), idx);
   if (prev.length < LOOKBACK / 2) return { signal: null, checked: bar };
   const avgVol = prev.reduce((s, b) => s + b.volume, 0) / prev.length;
   const avgRange = prev.reduce((s, b) => s + (b.high - b.low), 0) / prev.length;
   if (!(avgVol > 0) || !(avgRange > 0)) return { signal: null, checked: bar };
   const range = bar.high - bar.low;
-  const volRatio = bar.volume / avgVol, rangeRatio = range / avgRange;
+  const volRatio = bar.volume / (avgVol * elapsed), rangeRatio = range / (avgRange * Math.sqrt(elapsed));
   if (volRatio < VOL_MULT || rangeRatio < RANGE_MULT) return { signal: null, checked: bar };
   const pos = (bar.close - bar.low) / (range || 1); // 0 = 安値引け、1 = 高値引け
   const near = (level: number) => {
@@ -92,11 +103,11 @@ export function detect(tf: Tf, label: string, bars: IBar[], lv: Levels, now = Da
   const stats = { avgVol, avgRange };
   if (bar.close < bar.open && pos <= 0.34 && lv.putLevel != null) {
     const n = near(lv.putLevel);
-    if (n.crossed || n.distPct <= LEVEL_PCT) return { signal: { tf, label, side: "bottom", bar, volRatio, rangeRatio, level: lv.putLevel, ...n, stats }, checked: bar };
+    if (n.crossed || n.distPct <= LEVEL_PCT) return { signal: { tf, label, side: "bottom", bar, volRatio, rangeRatio, level: lv.putLevel, ...n, stats, inProgress, elapsed }, checked: bar };
   }
   if (bar.close > bar.open && pos >= 0.66 && lv.callLevel != null) {
     const n = near(lv.callLevel);
-    if (n.crossed || n.distPct <= LEVEL_PCT) return { signal: { tf, label, side: "top", bar, volRatio, rangeRatio, level: lv.callLevel, ...n, stats }, checked: bar };
+    if (n.crossed || n.distPct <= LEVEL_PCT) return { signal: { tf, label, side: "top", bar, volRatio, rangeRatio, level: lv.callLevel, ...n, stats, inProgress, elapsed }, checked: bar };
   }
   return { signal: null, checked: bar };
 }
@@ -107,11 +118,11 @@ const yen = (n: number) => Math.round(n).toLocaleString("ja-JP");
 export function composeMail(signals: Signal[], lv: Levels, siteUrl: string): { subject: string; text: string } {
   const s0 = signals[0];
   const kind = (s: Signal) => (s.side === "bottom" ? "大底候補" : "天井候補");
-  const subject = `【opt225】${kind(s0)}: ${signals.map((s) => s.label).join("・")} 出来高急増の${s0.side === "bottom" ? "下落" : "上昇"} @ ${yen(s0.bar.close)}`;
+  const subject = `【opt225】${s0.inProgress ? "速報 " : ""}${kind(s0)}: ${signals.map((s) => s.label).join("・")} 出来高急増の${s0.side === "bottom" ? "下落" : "上昇"} @ ${yen(s0.bar.close)}(${jst(s0.bar.t).slice(6, 11)}〜)`;
   const body = signals.map((s) => [
-    `■ ${kind(s)}(${s.label}) ${jst(s.bar.t)} の足`,
+    `■ ${kind(s)}(${s.label}) ${jst(s.bar.t)} の足${s.inProgress ? `(進行中・${Math.round(s.elapsed * 100)}%経過時点の速報。出来高・値幅は経過時間で按分して判定)` : ""}`,
     `  日経225先物(CME ${SYMBOL}) 始${yen(s.bar.open)} 高${yen(s.bar.high)} 安${yen(s.bar.low)} 終${yen(s.bar.close)}`,
-    `  出来高 ${yen(s.bar.volume)}(直近${LOOKBACK}本平均の ${s.volRatio.toFixed(1)}倍)、値幅 ${yen(s.bar.high - s.bar.low)}(平均の ${s.rangeRatio.toFixed(1)}倍)`,
+    `  出来高 ${yen(s.bar.volume)}(直近${LOOKBACK}本平均の ${s.volRatio.toFixed(1)}倍${s.inProgress ? "・按分後" : ""})、値幅 ${yen(s.bar.high - s.bar.low)}(平均の ${s.rangeRatio.toFixed(1)}倍)`,
     `  ${s.side === "bottom" ? "プット売り手の損益分岐" : "コール売り手の損益分岐"} ${yen(s.level)}(先物換算、日経平均ベース ${yen(s.side === "bottom" ? lv.putBreakeven! : lv.callBreakeven!)} + ベーシス ${lv.basis >= 0 ? "+" : ""}${yen(lv.basis)})`,
     `  ${s.crossed ? "この足で損益分岐をまたぎました" : `損益分岐まで ${(s.distPct * 100).toFixed(2)}%`}`,
   ].join("\n")).join("\n\n");

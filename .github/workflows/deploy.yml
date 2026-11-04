@@ -78,6 +78,14 @@ jobs:
           fi
           grep -Eo "https://[a-z0-9.-]+\.workers\.dev" deploy.log | grep -v example | sort -u | sed 's/^/::notice title=Deployed::/' || true
 
+      - name: Show cron triggers
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          R=$(curl -s -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/opt225/schedules")
+          echo "::notice title=cron triggers::$(echo "$R" | jq -c '{success, schedules: [.result.schedules[]?.cron], errors}')"
+
       # GitHub Secrets に登録されているものだけ Worker の secret に同期
       - name: Sync worker secrets
         env:

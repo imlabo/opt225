@@ -174,6 +174,13 @@ app.post("/admin/clear-sample", async (c) => {
 async function runAlerts(env: Env, opts: { send?: boolean; force?: boolean } = {}): Promise<{ signals: Signal[]; sent?: boolean; note: string; mail?: unknown }> {
   const send = opts.send ?? true;
   const state = (await loadMeta<AlertState>(env, "alert_state")) ?? { lastSent: {} };
+  // メール設定が入った最初の実行で、テストメールを 1 通送って疎通を記録する
+  if (send && env.RESEND_API_KEY && env.ALERT_TO && !(await loadMeta<unknown>(env, "alert_test_sent"))) {
+    const r = await sendMail(env.RESEND_API_KEY, env.ALERT_TO, "【opt225】アラート送信テスト", `天井・大底候補アラートとファーOTMの急騰・急落アラートのメール送信が有効になりました。
+
+${env.SITE_URL}`);
+    await saveMeta(env, "alert_test_sent", { at: Date.now(), ok: r.ok, status: r.status, body: r.body });
+  }
   const [dl] = (await loadDailyAnalyses(env, 1)).slice(-1);
   const lv = levelsFrom(dl);
   const checked: NonNullable<AlertState["lastRun"]>["checked"] = {};
@@ -218,7 +225,7 @@ app.get("/api/alerts/check", async (c) => {
   try { const r = await runAlerts(c.env, { send: false }); return c.json({ note: r.note, signals: r.signals.map((s) => ({ tf: s.tf, side: s.side, close: s.bar.close, level: s.level, volRatio: s.volRatio })) }); }
   catch (e) { return c.json({ error: String(e).slice(0, 300) }, 500); }
 });
-app.get("/api/alerts", async (c) => c.json({ state: await loadMeta<AlertState>(c.env, "alert_state"), log: ((await loadMeta<AlertLogItem[]>(c.env, "alert_log")) ?? []).slice(-20) }));
+app.get("/api/alerts", async (c) => c.json({ mail: await loadMeta<unknown>(c.env, "alert_test_sent"), state: await loadMeta<AlertState>(c.env, "alert_state"), log: ((await loadMeta<AlertLogItem[]>(c.env, "alert_log")) ?? []).slice(-20) }));
 /** 手動で判定(?send=1 で送信、?force=1 でクールダウン無視) */
 app.post("/admin/alert-check", async (c) => c.json(await runAlerts(c.env, { send: c.req.query("send") === "1", force: c.req.query("force") === "1" })));
 /** テストメール */

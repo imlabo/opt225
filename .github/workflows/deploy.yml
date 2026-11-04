@@ -86,9 +86,10 @@ jobs:
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
+          GH_DISPATCH_TOKEN: ${{ secrets.GH_DISPATCH_TOKEN }}
         run: |
           node -e '
-            const keys=["ADMIN_TOKEN","X_API_KEY","X_API_SECRET","X_ACCESS_TOKEN","X_ACCESS_SECRET"];
+            const keys=["ADMIN_TOKEN","X_API_KEY","X_API_SECRET","X_ACCESS_TOKEN","X_ACCESS_SECRET","GH_DISPATCH_TOKEN"];
             const o={}; for (const k of keys) if (process.env[k]) o[k]=process.env[k];
             require("fs").writeFileSync("secrets.json", JSON.stringify(o));
             console.log("syncing:", Object.keys(o).join(", ") || "(none)");'

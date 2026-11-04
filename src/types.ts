@@ -37,4 +37,6 @@ export interface Env {
   X_API_SECRET?: string;
   X_ACCESS_TOKEN?: string;
   X_ACCESS_SECRET?: string;
+  GH_DISPATCH_TOKEN?: string; // GitHub の fine-grained PAT(Actions: Read and write)。引け後に daily ワークフローを起動するため
+  GH_REPO?: string; // 既定 imlabo/opt225
 }

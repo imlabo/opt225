@@ -10,6 +10,8 @@ import { tokyoNow } from "../src/yahoo.ts";
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36";
 const site = process.env.SITE_URL;
 const POLL = Number(process.env.POLL_SEC ?? 120) * 1000;
+const MAX_RUN_MS = Number(process.env.MAX_RUN_MIN ?? 330) * 60 * 1000; // GitHub の 6 時間上限より前に自分で終了
+const started = Date.now();
 const [dh, dm] = (process.env.DEADLINE ?? "23:45").split(":").map(Number);
 const deadlineMin = dh * 60 + dm;
 
@@ -55,6 +57,7 @@ let lastSeen = "";
 while (true) {
   if ((await siteLatest()) === today) { console.log(`::notice title=Daily::${today} ingested at ${stamp()}`); process.exit(0); }
   const now = tokyoNow();
+  if (Date.now() - started > MAX_RUN_MS) { console.log(`::warning title=Daily::giving up after ${Math.round(MAX_RUN_MS / 60000)} min (${stamp()})`); process.exit(0); }
   if (now.date !== today || now.minutes >= deadlineMin) {
     console.log(`::warning title=Daily::JPX files for ${today} not published by ${stamp()} (holiday?) — giving up`);
     process.exit(0);

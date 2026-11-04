@@ -169,9 +169,26 @@ app.post("/admin/clear-sample", async (c) => {
   return c.json({ ok: true });
 });
 
+/** GitHub Actions の daily ワークフローを workflow_dispatch(mode=wait)で起動 */
+async function dispatchDaily(env: Env): Promise<{ dispatched: boolean; status?: number; reason?: string }> {
+  if (!env.GH_DISPATCH_TOKEN) return { dispatched: false, reason: "GH_DISPATCH_TOKEN not set" };
+  const repo = env.GH_REPO ?? "imlabo/opt225";
+  const r = await fetch(`https://api.github.com/repos/${repo}/actions/workflows/daily.yml/dispatches`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${env.GH_DISPATCH_TOKEN}`, Accept: "application/vnd.github+json", "User-Agent": "opt225-worker", "X-GitHub-Api-Version": "2022-11-28" },
+    body: JSON.stringify({ ref: "main", inputs: { mode: "wait" } }),
+  });
+  return { dispatched: r.status === 204, status: r.status, reason: r.status === 204 ? undefined : (await r.text()).slice(0, 200) };
+}
+
+/** 手動で日次ワークフローを起動(動作確認用) */
+app.post("/admin/dispatch-daily", async (c) => c.json(await dispatchDaily(c.env)));
+
 export default {
   fetch: app.fetch,
-  async scheduled(_ctrl: ScheduledController, env: Env, ctx: ExecutionContext) {
-    ctx.waitUntil(runPipeline(env).then((r) => console.log(JSON.stringify(r))));
+  async scheduled(ctrl: ScheduledController, env: Env, ctx: ExecutionContext) {
+    // 週次(木・金 16:30 JST)は JPX 取得→分析→投稿。平日の引け後は GitHub Actions の日次取り込み(待機ループ)を起動
+    if (ctrl.cron === "30 7 * * 4,5") ctx.waitUntil(runPipeline(env).then((r) => console.log(JSON.stringify(r))));
+    else ctx.waitUntil(dispatchDaily(env).then((r) => console.log(JSON.stringify(r))));
   },
 } satisfies ExportedHandler<Env>;

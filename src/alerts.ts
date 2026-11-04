@@ -11,7 +11,7 @@
  *   値幅(高値−安値) ≥ RANGE_MULT × 直近 LOOKBACK 本の平均値幅、かつ終値が足の下 1/3(上昇なら上 1/3)
  *   損益分岐(先物換算 = 日経平均ベースの損益分岐 + ベーシス)との距離 ≤ LEVEL_PCT、または足がその水準をまたいだ
  */
-import type { DailyAnalysis } from "./daily";
+import type { DailyAnalysis, DailyStrike } from "./daily";
 
 export const TIMEFRAMES = [
   { tf: "5m", label: "5分足", range: "2d" },
@@ -138,4 +138,48 @@ export async function sendMail(apiKey: string, to: string, subject: string, text
     body: JSON.stringify({ from: "opt225 <onboarding@resend.dev>", to: [to], subject, text }),
   });
   return { ok: r.ok, status: r.status, body: (await r.text()).slice(0, 300) };
+}
+
+// ---- ファーOTM(遠い行使価格)のプット・コールの価格変化(日次) ----
+
+export const FAR_PCTS = [0.07, 0.10]; // 現値から 7% / 10% 離れた行使価格
+export const FAR_UP = 2.0; // 前日比 2 倍以上で急騰
+export const FAR_DOWN = 0.5; // 前日比 半分以下で急落
+export const FAR_MIN_PX = 5; // これ未満の価格は対象外(ノイズ)
+
+export interface FarQuote { side: "put" | "call"; pct: number; strike: number; px: number; prevPx: number | null; ratio: number | null; iv: number | null; oi: number }
+
+const nearestStrike = <T extends { strike: number }>(rows: T[], target: number) => rows.reduce((b, r) => (Math.abs(r.strike - target) < Math.abs(b.strike - target) ? r : b));
+
+/** 期近の行使価格別データから、現値 ±7%/10% のプット・コールの清算価格と前日比を出す */
+export function farQuotes(rows: DailyStrike[], prevRows: DailyStrike[], spot: number): FarQuote[] {
+  const out: FarQuote[] = [];
+  const puts = rows.filter((r) => r.putPx != null), calls = rows.filter((r) => r.callPx != null);
+  for (const pct of FAR_PCTS) {
+    if (puts.length) {
+      const r = nearestStrike(puts, spot * (1 - pct));
+      const p = prevRows.find((x) => x.strike === r.strike && x.month === r.month)?.putPx ?? null;
+      out.push({ side: "put", pct, strike: r.strike, px: r.putPx!, prevPx: p, ratio: p && p > 0 ? r.putPx! / p : null, iv: r.putIv ?? null, oi: r.putOi ?? 0 });
+    }
+    if (calls.length) {
+      const r = nearestStrike(calls, spot * (1 + pct));
+      const p = prevRows.find((x) => x.strike === r.strike && x.month === r.month)?.callPx ?? null;
+      out.push({ side: "call", pct, strike: r.strike, px: r.callPx!, prevPx: p, ratio: p && p > 0 ? r.callPx! / p : null, iv: r.callIv ?? null, oi: r.callOi ?? 0 });
+    }
+  }
+  return out;
+}
+
+export function farSignals(q: FarQuote[]): FarQuote[] {
+  return q.filter((x) => x.ratio != null && Math.max(x.px, x.prevPx ?? 0) >= FAR_MIN_PX && (x.ratio >= FAR_UP || x.ratio <= FAR_DOWN));
+}
+
+export function composeFarMail(sig: FarQuote[], tradeDate: string, spot: number, month: string, siteUrl: string): { subject: string; text: string } {
+  const f = (x: FarQuote) => `${x.side === "put" ? "プット" : "コール"} ${yen(x.strike)}(${Math.round(x.pct * 100)}%${x.side === "put" ? "下" : "上"})`;
+  const head = sig.map((x) => `${f(x)} ${x.ratio! >= 1 ? "急騰" : "急落"} ${yen(x.prevPx!)}→${yen(x.px)}円(${x.ratio!.toFixed(1)}倍)`).join(" / ");
+  const subject = `【opt225】ファーOTM ${sig.some((x) => x.ratio! >= 1) ? "急騰" : "急落"}: ${head}`.slice(0, 120);
+  const text = `${tradeDate} 引け(${Number(month.slice(4))}月限、日経平均 ${yen(spot)})\n\n` +
+    sig.map((x) => `■ ${f(x)}\n  清算価格 ${yen(x.prevPx!)} → ${yen(x.px)} 円(前日比 ${x.ratio!.toFixed(2)}倍)${x.iv != null ? ` / IV ${x.iv.toFixed(1)}%` : ""} / 建玉 ${yen(x.oi)}枚`).join("\n\n") +
+    `\n\n遠い行使価格のオプションが前日比 ${FAR_UP}倍以上(急騰)または ${FAR_DOWN}倍以下(急落)になりました。\n急騰は急変動への備え(ヘッジ買い)か売り手の踏み上げ、急落は警戒の後退を示唆します。\n\n${siteUrl}\n\n※JPX の日次清算値段に基づく判定(場中の価格ではありません)。投資助言ではありません。`;
+  return { subject, text };
 }

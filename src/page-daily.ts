@@ -238,6 +238,20 @@ function squeezeSection(a: DailyAnalysis, hist: SqueezeHist[]): string {
     <p class="muted small">オプションの売り手が「踏まれる」恐怖を 0〜100 で表した本サイト独自の指数(50 = 平常、60以上 警戒、75以上 パニック)。期近限月について、①現値から売り手全体の損益分岐までが SQ までの 1σ の何倍か、②建玉全体の時価(売り手の負債)の前日比、③現値から 1σ 以内の踏まれる側にある建玉の比率、④ATM IV とスキューの前日比(プット側は IV+スキュー、コール側は IV−スキュー)、⑤踏まれる方向に動いた日の現値近辺の建玉の減少(損切りの買い戻し)を点数化して平均しています。${mode}。</p>`;
 }
 
+/** ファーOTM の価格 */
+function farSection(a: DailyAnalysis): string {
+  const q = a.far;
+  if (!q?.length) return "";
+  const rows = q.map((x) => {
+    const r = x.ratio;
+    const cls = r == null ? "" : r >= 2 ? "sq-hot" : r <= 0.5 ? "sq-calm" : "";
+    return `<tr><td>${x.side === "put" ? "プット" : "コール"} ${Math.round(x.pct * 100)}%${x.side === "put" ? "下" : "上"}</td><td>${yen(x.strike)}</td><td>${yen(x.px)}円</td><td class="${cls}">${x.prevPx != null ? `${yen(x.prevPx)}円 → ${r!.toFixed(2)}倍` : "—"}</td><td>${x.iv != null ? x.iv.toFixed(1) + "%" : "—"}</td><td>${yen(x.oi)}</td></tr>`;
+  }).join("");
+  return `<h4>ファーOTMの価格(期近、現値から7%・10%離れた行使価格)</h4>
+    <div class="table-wrap"><table><thead><tr><th></th><th>行使価格</th><th>清算価格</th><th>前日</th><th>IV</th><th>建玉</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <p class="muted small">前日比 2倍以上(急騰)・0.5倍以下(急落)のときはメールで通知します。遠いプットの急騰は急落への備え(ヘッジ買い)やプット売り手の踏み上げ、遠いコールの急騰は上昇への備えや踏み上げの目安。JPX の日次清算値段に基づくため、場中の変化は反映しません。</p>`;
+}
+
 function trend(history: DailyAnalysis[]): string {
   const rows = history.slice(-10).reverse();
   if (rows.length < 2) return "";
@@ -269,6 +283,7 @@ export function renderDailySection(a: DailyAnalysis | undefined, history: DailyA
     <h4>行使価格別 建玉(${esc(m)}, 500円刻み)</h4>
     ${oiChart(a, strikes)}
     ${squeezeSection(a, squeezeHist)}
+    ${farSection(a)}
     ${greeksSection(a)}
     ${sellerSection(a)}
     <p class="muted small">建玉が当日増えた行使価格: プット ${a.topPutAdds.map((t) => `${yen(t.strike)}(+${yen(t.chg)})`).join("、") || "—"} / コール ${a.topCallAdds.map((t) => `${yen(t.strike)}(+${yen(t.chg)})`).join("、") || "—"}</p>

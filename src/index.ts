@@ -218,17 +218,6 @@ app.get("/api/alerts/check", async (c) => {
   try { const r = await runAlerts(c.env, { send: false }); return c.json({ note: r.note, signals: r.signals.map((s) => ({ tf: s.tf, side: s.side, close: s.bar.close, level: s.level, volRatio: s.volRatio })) }); }
   catch (e) { return c.json({ error: String(e).slice(0, 300) }, 500); }
 });
-/** オプション価格ボード(QRI/JPX)の取得テスト: 先頭だけ返す */
-app.get("/api/debug/optboard", async (c) => {
-  const u = c.req.query("u") ?? "https://svc.qri.jp/jpx/nkopm/";
-  if (!/^https:\/\/svc\.qri\.jp\//.test(u)) return c.json({ error: "only svc.qri.jp" }, 400);
-  try {
-    const r = await fetch(u, { headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36", Accept: "text/html,application/json;q=0.9,*/*;q=0.8", "Accept-Language": "ja" } });
-    const t = await r.text();
-    const from = Number(c.req.query("from") ?? 0);
-    return c.json({ status: r.status, type: r.headers.get("content-type"), length: t.length, body: t.slice(from, from + Number(c.req.query("n") ?? 4000)) });
-  } catch (e) { return c.json({ error: String(e) }, 500); }
-});
 app.get("/api/alerts", async (c) => c.json({ state: await loadMeta<AlertState>(c.env, "alert_state"), log: ((await loadMeta<AlertLogItem[]>(c.env, "alert_log")) ?? []).slice(-20) }));
 /** 手動で判定(?send=1 で送信、?force=1 でクールダウン無視) */
 app.post("/admin/alert-check", async (c) => c.json(await runAlerts(c.env, { send: c.req.query("send") === "1", force: c.req.query("force") === "1" })));

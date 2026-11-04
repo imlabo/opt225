@@ -9,6 +9,7 @@ import { hasWeek, loadHistory, logPost, saveAnalysis, saveWeek, wasPosted } from
 import { discoverLatestFiles, fetchWeek, weekFromFileName } from "./jpx";
 import type { Env, WeekData } from "./types";
 import { squeezeRaw, squeezeScore, upsertHist, type SqueezeHist } from "./squeeze";
+import { composeFarMail, farQuotes, farSignals, sendMail } from "./alerts";
 import { composeTweet, postTweet } from "./x";
 
 export interface RunResult {
@@ -101,6 +102,18 @@ export async function ingestDaily(env: Env, d: DailyInput, forcePost = false) {
     a.squeeze = squeezeScore(raw, hist.filter((h) => h.date < a.tradeDate));
     await saveMeta(env, "squeeze_hist", upsertHist(hist, raw, a.squeeze));
   } catch (e) { console.log(`squeeze: ${e}`); }
+  // ファーOTM のプット・コールの価格変化(前日比)。急騰・急落ならメール
+  try {
+    const rows = d.strikes.filter((s) => s.month === a.front.month);
+    const prevRows = prev ? await loadDailyStrikes(env, prev.tradeDate, a.front.month) : [];
+    a.far = farQuotes(rows, prevRows, a.spot);
+    const sig = farSignals(a.far);
+    if (sig.length && env.RESEND_API_KEY && env.ALERT_TO && !(await loadMeta<string[]>(env, "far_alerted"))?.includes(a.tradeDate)) {
+      const m = composeFarMail(sig, a.tradeDate, a.spot, a.front.month, env.SITE_URL);
+      const r = await sendMail(env.RESEND_API_KEY, env.ALERT_TO, m.subject, m.text);
+      if (r.ok) await saveMeta(env, "far_alerted", [...((await loadMeta<string[]>(env, "far_alerted")) ?? []), a.tradeDate].slice(-30));
+    }
+  } catch (e) { console.log(`far: ${e}`); }
   await saveDaily(env, d, a);
   const learn = await learnAndPredict(env, a);
 

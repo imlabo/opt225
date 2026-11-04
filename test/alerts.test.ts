@@ -37,3 +37,16 @@ describe("alerts", () => {
     expect(d.signal?.side).toBe("top");
   });
 });
+
+describe("far OTM", () => {
+  it("picks 7%/10% OTM strikes and flags doubling / halving", async () => {
+    const { farQuotes, farSignals } = await import("../src/alerts");
+    const rows = [57000, 58000, 59000, 60000, 64000, 68000, 69000, 70000].map((k) => ({ month: "202611", strike: k, putPx: k < 64000 ? 20 : undefined, callPx: k > 64000 ? 30 : undefined, putOi: 100, callOi: 100 }));
+    const prev = rows.map((r) => ({ ...r, putPx: r.putPx && 5, callPx: r.callPx && 60 }));
+    const q = farQuotes(rows, prev, 64000);
+    expect(q.map((x) => `${x.side}${x.strike}`)).toEqual(["put59500".replace("59500", "60000"), "call68000", "put58000", "call70000"].map((s) => s)); // 7%下=59,520→60,000、7%上=68,480→68,000、10%下=57,600→58,000、10%上=70,400→70,000
+    const sig = farSignals(q);
+    expect(sig.filter((x) => x.side === "put").every((x) => x.ratio === 4)).toBe(true);
+    expect(sig.filter((x) => x.side === "call").every((x) => x.ratio === 0.5)).toBe(true);
+  });
+});

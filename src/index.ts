@@ -239,7 +239,7 @@ app.get("/api/intraday", async (c) => {
     return c.json({ symbol: SYMBOL, tf: tf.tf, label: tf.label, bars: bars.slice(-400), levels: lv, climax: scanClimax(bars, lv) });
   } catch (e) { return c.json({ error: String(e).slice(0, 200) }, 500); }
 });
-app.get("/api/alerts", async (c) => c.json({ mail: await loadMeta<unknown>(c.env, "alert_test_sent"), state: await loadMeta<AlertState>(c.env, "alert_state"), log: ((await loadMeta<AlertLogItem[]>(c.env, "alert_log")) ?? []).slice(-20) }));
+app.get("/api/alerts", async (c) => c.json({ cron: ((await loadMeta<unknown[]>(c.env, "cron_log")) ?? []).slice(-5), mail: await loadMeta<unknown>(c.env, "alert_test_sent"), state: await loadMeta<AlertState>(c.env, "alert_state"), log: ((await loadMeta<AlertLogItem[]>(c.env, "alert_log")) ?? []).slice(-20) }));
 /** 手動で判定(?send=1 で送信、?force=1 でクールダウン無視) */
 app.post("/admin/alert-check", async (c) => c.json(await runAlerts(c.env, { send: c.req.query("send") === "1", force: c.req.query("force") === "1" })));
 /** テストメール */
@@ -267,11 +267,22 @@ app.post("/admin/dispatch-daily", async (c) => c.json(await dispatchDaily(c.env)
 export default {
   fetch: app.fetch,
   async scheduled(ctrl: ScheduledController, env: Env, ctx: ExecutionContext) {
-    // 週次(木・金 16:30 JST)は JPX 取得→分析→投稿。平日の引け後は GitHub Actions の日次取り込み(待機ループ)を起動
-    if (ctrl.cron === "30 7 * * 4,5") ctx.waitUntil(runPipeline(env).then((r) => console.log(JSON.stringify(r))));
-    else if (ctrl.cron === "*/5 * * * 1-6") ctx.waitUntil(runAlerts(env).then((r) => console.log(JSON.stringify({ alerts: r.signals.length, sent: r.sent, note: r.note }))).catch(async (e) => {
-      await saveMeta(env, "alert_state", { lastSent: {}, lastRun: { at: Date.now(), ok: false, note: `error: ${String(e).slice(0, 200)}`, checked: {} } });
-    }));
-    else ctx.waitUntil(dispatchDaily(env).then((r) => console.log(JSON.stringify(r))));
+    // 週次(木・金 16:30 JST)は JPX 取得→分析→投稿。5 分ごとはアラート。それ以外(平日 15:50 / 18:00 JST)は GitHub Actions の日次取り込みを起動
+    const cron = ctrl.cron ?? "";
+    const kind = /^\*\/5\b/.test(cron) ? "alerts" : /^30 7\b/.test(cron) ? "weekly" : "dispatch";
+    ctx.waitUntil((async () => {
+      const log = (await loadMeta<{ cron: string; kind: string; at: number; result?: string }[]>(env, "cron_log")) ?? [];
+      let result = "";
+      try {
+        if (kind === "weekly") result = JSON.stringify(await runPipeline(env)).slice(0, 200);
+        else if (kind === "alerts") { const r = await runAlerts(env); result = JSON.stringify({ alerts: r.signals.length, sent: r.sent, note: r.note }); }
+        else result = JSON.stringify(await dispatchDaily(env));
+      } catch (e) {
+        result = `error: ${String(e).slice(0, 200)}`;
+        if (kind === "alerts") await saveMeta(env, "alert_state", { lastSent: {}, lastRun: { at: Date.now(), ok: false, note: result, checked: {} } });
+      }
+      await saveMeta(env, "cron_log", [...log, { cron, kind, at: Date.now(), result }].slice(-50));
+      console.log(JSON.stringify({ cron, kind, result }));
+    })());
   },
 } satisfies ExportedHandler<Env>;

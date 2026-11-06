@@ -76,3 +76,18 @@ describe("x posts", () => {
     expect(f).toContain("急騰"); expect(weightedLength(f)).toBeLessThanOrEqual(280);
   });
 });
+
+describe("5m bottoms", () => {
+  it("catches a 5m climax that arrives late, and bars already below the put sellers' breakeven", () => {
+    const bars = mk(30, 61000); // 損益分岐 61,706 より下で推移
+    const t = bars[28].t;
+    bars[28] = { t, open: 61000, high: 61010, low: 60600, close: 60620, volume: 3000 }; // 下に抜けたクライマックス
+    // 12 分後(足 2 本ぶん遅れて届いた)でも拾う
+    const d = detect("5m", "5分足", bars, lv, (t + 12 * 60) * 1000);
+    expect(d.signal?.side).toBe("bottom");
+    expect(d.signal?.bar.t).toBe(t);
+    expect(d.signal?.beyond).toBe(true);
+    // 40 分後は古すぎるので拾わない
+    expect(detect("5m", "5分足", bars, lv, (t + 40 * 60) * 1000).signal).toBeNull();
+  });
+});

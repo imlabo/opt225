@@ -10,7 +10,7 @@ import { analyzeAndPost, ingestDaily, ingestManual, rebuildSqueeze, runPipeline,
 import { composeAlertTweet } from "./x";
 import type { ViPoint } from "./vi";
 import type { WeeklyReport, WeeklyWeights } from "./weekly-tuning";
-import { COOLDOWN_MIN, composeMail, detect, levelsFrom, parseIntraday, scanClimax, sendMail, SYMBOL, TIMEFRAMES, type AlertLogItem, type AlertState, type Signal } from "./alerts";
+import { COOLDOWN_BY_TF, composeMail, detect, levelsFrom, parseIntraday, scanClimax, sendMail, SYMBOL, TIMEFRAMES, type AlertLogItem, type AlertState, type Signal } from "./alerts";
 import type { SqueezeHist } from "./squeeze";
 import { DEFAULT_CONFIG, type ModelConfig, type TuningReport } from "./tuning";
 import { renderPage } from "./page";
@@ -205,9 +205,9 @@ ${env.SITE_URL}`);
       } catch (e) { note += `${tf}: ${String(e).slice(0, 80)}; `; checked[tf] = null; }
     }
   }
-  // 同じ時間足・向きは COOLDOWN_MIN 分あける
+  // 同じ時間足・向きは時間足ごとの間隔をあけ、同じ足は二度送らない
   const now = Date.now();
-  const fresh = signals.filter((s) => opts.force || now - (state.lastSent[`${s.tf}:${s.side}`] ?? 0) > COOLDOWN_MIN * 60 * 1000);
+  const fresh = signals.filter((s) => opts.force || (now - (state.lastSent[`${s.tf}:${s.side}`] ?? 0) > COOLDOWN_BY_TF[s.tf] * 60 * 1000 && !state.lastSent[`${s.tf}:${s.side}:${s.bar.t}`]));
   let sent: boolean | undefined, mail: unknown;
   if (fresh.length && send && lv) {
     if (!env.RESEND_API_KEY || !env.ALERT_TO) { note += "RESEND_API_KEY/ALERT_TO not set; "; sent = false; }
@@ -217,7 +217,9 @@ ${env.SITE_URL}`);
       sent = (mail as { ok: boolean }).ok;
     }
     const tweetId = await tryTweet(env, composeAlertTweet(fresh, env.SITE_URL));
-    if (sent || tweetId) for (const s of fresh) state.lastSent[`${s.tf}:${s.side}`] = now;
+    if (sent || tweetId) for (const s of fresh) { state.lastSent[`${s.tf}:${s.side}`] = now; state.lastSent[`${s.tf}:${s.side}:${s.bar.t}`] = now; }
+    // 古い足のキーは掃除
+    for (const k of Object.keys(state.lastSent)) if (k.split(":").length === 3 && now - state.lastSent[k] > 864e5) delete state.lastSent[k];
     const log = (await loadMeta<AlertLogItem[]>(env, "alert_log")) ?? [];
     await saveMeta(env, "alert_log", [...log, ...fresh.map((s) => ({ at: now, tf: s.tf, side: s.side, close: s.bar.close, level: s.level, volRatio: s.volRatio, sent: !!sent }))].slice(-100));
   }

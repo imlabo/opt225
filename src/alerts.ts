@@ -24,7 +24,7 @@ export const VOL_MULT = 2.0;
 export const RANGE_MULT = 1.5;
 export const LEVEL_PCT = 0.008; // 損益分岐との距離 0.8% 以内
 export const LOOKBACK = 20;
-export const COOLDOWN_MIN = 120;
+export const COOLDOWN_MIN = 120; // 既定(時間足ごとは COOLDOWN_BY_TF)
 export const SYMBOL = "NKD=F";
 
 export interface IBar { t: number; open: number; high: number; low: number; close: number; volume: number }
@@ -62,54 +62,58 @@ export interface Signal {
   side: "bottom" | "top";
   bar: IBar;
   volRatio: number; rangeRatio: number;
-  level: number; distPct: number; crossed: boolean;
+  level: number; distPct: number; crossed: boolean; beyond?: boolean; // beyond = 足全体が損益分岐の外(売り手が損失圏)
   stats: { avgVol: number; avgRange: number };
   inProgress: boolean; elapsed: number; // 進行中の足での速報か(経過割合)
 }
 
-export const MAX_AGE_TF = 2; // 最後の足がこの倍率 × 時間足より古ければ(データ遅延・取引停止)判定しない
+/** 判定対象にする足の古さの上限(分)。Yahoo の 5分足・15分足は 10〜20 分遅れて届くことがあるため余裕を持たせる */
+export const MAX_AGE_MIN: Record<Tf, number> = { "5m": 30, "15m": 60, "60m": 150 };
+/** 同じ時間足・向きの再通知までの間隔(分) */
+export const COOLDOWN_BY_TF: Record<Tf, number> = { "5m": 30, "15m": 60, "60m": 120 };
 export const MIN_ELAPSED = 0.3; // 進行中の足は、時間足の 30% 以上経過してから判定
 
 /**
- * 最新の足でクライマックスと水準接近を判定。
- * 最後の足が進行中なら経過時間で按分して「速報」として判定(出来高は経過割合で、値幅はその平方根で割る)。
- * 最後の足が古すぎる(出来高が未反映など)場合は判定しない(何時間も前の足を今さら通知しない)。
+ * 直近の足(MAX_AGE_MIN 以内)を新しい順に見て、最初に条件を満たした足を返す。
+ *  - 進行中の足は経過時間で按分して「速報」として判定(出来高は経過割合で、値幅はその平方根で割る)
+ *  - データが遅れて届いた確定足も、MAX_AGE_MIN 以内なら拾う(1本だけ見ていると取りこぼすため)
+ *  - 水準: 大底候補はプット売り手の損益分岐の 0.8% 以内か、それより下(売り手が損失圏)。天井候補はその逆
  */
 export function detect(tf: Tf, label: string, bars: IBar[], lv: Levels, now = Date.now()): { signal: Signal | null; checked: IBar | null } {
   const done = bars.filter((b) => b.volume > 0);
   if (done.length < LOOKBACK + 2) return { signal: null, checked: null };
   const tfMs = (tf === "5m" ? 5 : tf === "15m" ? 15 : 60) * 60 * 1000;
-  const idx = done.length - 1;
-  const bar = done[idx];
-  const age = now - bar.t * 1000;
-  if (age > MAX_AGE_TF * tfMs) return { signal: null, checked: bar };
-  const inProgress = age < tfMs;
-  const elapsed = inProgress ? Math.max(0, Math.min(1, age / tfMs)) : 1;
-  if (inProgress && elapsed < MIN_ELAPSED) return { signal: null, checked: bar };
-  const prev = done.slice(Math.max(0, idx - LOOKBACK), idx);
-  if (prev.length < LOOKBACK / 2) return { signal: null, checked: bar };
-  const avgVol = prev.reduce((s, b) => s + b.volume, 0) / prev.length;
-  const avgRange = prev.reduce((s, b) => s + (b.high - b.low), 0) / prev.length;
-  if (!(avgVol > 0) || !(avgRange > 0)) return { signal: null, checked: bar };
-  const range = bar.high - bar.low;
-  const volRatio = bar.volume / (avgVol * elapsed), rangeRatio = range / (avgRange * Math.sqrt(elapsed));
-  if (volRatio < VOL_MULT || rangeRatio < RANGE_MULT) return { signal: null, checked: bar };
-  const pos = (bar.close - bar.low) / (range || 1); // 0 = 安値引け、1 = 高値引け
-  const near = (level: number) => {
-    const crossed = bar.low <= level && level <= bar.high;
-    const dist = Math.min(Math.abs(bar.low - level), Math.abs(bar.close - level), Math.abs(bar.high - level)) / bar.close;
-    return { crossed, distPct: crossed ? 0 : dist };
-  };
-  const stats = { avgVol, avgRange };
-  if (bar.close < bar.open && pos <= 0.34 && lv.putLevel != null) {
-    const n = near(lv.putLevel);
-    if (n.crossed || n.distPct <= LEVEL_PCT) return { signal: { tf, label, side: "bottom", bar, volRatio, rangeRatio, level: lv.putLevel, ...n, stats, inProgress, elapsed }, checked: bar };
+  const checked = done[done.length - 1];
+  for (let idx = done.length - 1; idx >= LOOKBACK; idx--) {
+    const bar = done[idx];
+    const age = now - bar.t * 1000;
+    if (age > MAX_AGE_MIN[tf] * 60 * 1000) break;
+    const inProgress = age < tfMs;
+    const elapsed = inProgress ? Math.max(0, Math.min(1, age / tfMs)) : 1;
+    if (inProgress && elapsed < MIN_ELAPSED) continue;
+    const prev = done.slice(idx - LOOKBACK, idx);
+    const avgVol = prev.reduce((s, b) => s + b.volume, 0) / prev.length;
+    const avgRange = prev.reduce((s, b) => s + (b.high - b.low), 0) / prev.length;
+    if (!(avgVol > 0) || !(avgRange > 0)) continue;
+    const range = bar.high - bar.low;
+    const volRatio = bar.volume / (avgVol * elapsed), rangeRatio = range / (avgRange * Math.sqrt(elapsed));
+    if (volRatio < VOL_MULT || rangeRatio < RANGE_MULT) continue;
+    const pos = (bar.close - bar.low) / (range || 1); // 0 = 安値引け、1 = 高値引け
+    const stats = { avgVol, avgRange };
+    if (bar.close < bar.open && pos <= 0.34 && lv.putLevel != null) {
+      const crossed = bar.low <= lv.putLevel && lv.putLevel <= bar.high;
+      const beyond = bar.high < lv.putLevel; // 足全体が損益分岐より下(売り手が損失圏)
+      const distPct = crossed || beyond ? 0 : (bar.low - lv.putLevel) / bar.close;
+      if (crossed || beyond || distPct <= LEVEL_PCT) return { signal: { tf, label, side: "bottom", bar, volRatio, rangeRatio, level: lv.putLevel, crossed, beyond, distPct, stats, inProgress, elapsed }, checked };
+    }
+    if (bar.close > bar.open && pos >= 0.66 && lv.callLevel != null) {
+      const crossed = bar.low <= lv.callLevel && lv.callLevel <= bar.high;
+      const beyond = bar.low > lv.callLevel;
+      const distPct = crossed || beyond ? 0 : (lv.callLevel - bar.high) / bar.close;
+      if (crossed || beyond || distPct <= LEVEL_PCT) return { signal: { tf, label, side: "top", bar, volRatio, rangeRatio, level: lv.callLevel, crossed, beyond, distPct, stats, inProgress, elapsed }, checked };
+    }
   }
-  if (bar.close > bar.open && pos >= 0.66 && lv.callLevel != null) {
-    const n = near(lv.callLevel);
-    if (n.crossed || n.distPct <= LEVEL_PCT) return { signal: { tf, label, side: "top", bar, volRatio, rangeRatio, level: lv.callLevel, ...n, stats, inProgress, elapsed }, checked: bar };
-  }
-  return { signal: null, checked: bar };
+  return { signal: null, checked };
 }
 
 const jst = (t: number) => new Date(t * 1000 + 9 * 3600 * 1000).toISOString().replace("T", " ").slice(5, 16) + " JST";
@@ -124,7 +128,7 @@ export function composeMail(signals: Signal[], lv: Levels, siteUrl: string): { s
     `  日経225先物(CME ${SYMBOL}) 始${yen(s.bar.open)} 高${yen(s.bar.high)} 安${yen(s.bar.low)} 終${yen(s.bar.close)}`,
     `  出来高 ${yen(s.bar.volume)}(直近${LOOKBACK}本平均の ${s.volRatio.toFixed(1)}倍${s.inProgress ? "・按分後" : ""})、値幅 ${yen(s.bar.high - s.bar.low)}(平均の ${s.rangeRatio.toFixed(1)}倍)`,
     `  ${s.side === "bottom" ? "プット売り手の損益分岐" : "コール売り手の損益分岐"} ${yen(s.level)}(先物換算、日経平均ベース ${yen(s.side === "bottom" ? lv.putBreakeven! : lv.callBreakeven!)} + ベーシス ${lv.basis >= 0 ? "+" : ""}${yen(lv.basis)})`,
-    `  ${s.crossed ? "この足で損益分岐をまたぎました" : `損益分岐まで ${(s.distPct * 100).toFixed(2)}%`}`,
+    `  ${s.crossed ? "この足で損益分岐をまたぎました" : s.beyond ? `損益分岐を${s.side === "bottom" ? "下回った" : "上回った"}圏内(売り手が損失を抱えた状態、損益分岐から ${(Math.abs(s.bar.close - s.level) / s.bar.close * 100).toFixed(1)}%)` : `損益分岐まで ${(s.distPct * 100).toFixed(2)}%`}`,
   ].join("\n")).join("\n\n");
   const text = `${body}
 
@@ -152,9 +156,9 @@ export function scanClimax(bars: IBar[], lv: Levels | null): { t: number; side: 
     const range = bar.high - bar.low, volRatio = bar.volume / avgVol;
     if (volRatio < VOL_MULT || range / avgRange < RANGE_MULT) continue;
     const pos = (bar.close - bar.low) / (range || 1);
-    const nearLv = (level: number | null | undefined) => level != null && ((bar.low <= level && level <= bar.high) || Math.min(Math.abs(bar.low - level), Math.abs(bar.high - level), Math.abs(bar.close - level)) / bar.close <= LEVEL_PCT);
-    if (bar.close < bar.open && pos <= 0.34) out.push({ t: bar.t, side: "bottom", near: nearLv(lv?.putLevel), volRatio });
-    else if (bar.close > bar.open && pos >= 0.66) out.push({ t: bar.t, side: "top", near: nearLv(lv?.callLevel), volRatio });
+    const put = lv?.putLevel, call = lv?.callLevel;
+    if (bar.close < bar.open && pos <= 0.34) out.push({ t: bar.t, side: "bottom", near: put != null && bar.low <= put * (1 + LEVEL_PCT), volRatio });
+    else if (bar.close > bar.open && pos >= 0.66) out.push({ t: bar.t, side: "top", near: call != null && bar.high >= call * (1 - LEVEL_PCT), volRatio });
   }
   return out;
 }

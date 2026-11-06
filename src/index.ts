@@ -306,6 +306,18 @@ app.post("/admin/mt5-push", async (c) => {
   return c.json({ ok: true, saved });
 });
 
+/** MT5 からの受信状況 */
+app.get("/api/mt5/status", async (c) => {
+  c.header("Cache-Control", "no-store");
+  const out: Record<string, unknown> = { now: Date.now(), offset: await loadMeta(c.env, "mt5_offset") };
+  for (const { tf } of TIMEFRAMES) {
+    const p = await loadMeta<PushedBars>(c.env, `mt5_bars_${tf}`);
+    const last = p?.bars[p.bars.length - 1];
+    out[tf] = p ? { symbol: p.symbol, receivedAgoSec: Math.round((Date.now() - p.receivedAt) / 1000), bars: p.bars.length, last } : null;
+  }
+  return c.json(out);
+});
+
 /** X 投稿の記録(直近。本文・状態・エラー) */
 app.get("/api/posts", async (c) => {
   const d = await c.env.DB.prepare("SELECT trade_date AS key, tweet_id, text, status, error, posted_at FROM daily_posts ORDER BY trade_date DESC LIMIT 5").all();

@@ -11,7 +11,8 @@ import type { DailyAnalysis } from "./daily";
 
 export const ICHI_FEATURES = ["ichiTk", "ichiCloud", "ichiChikou", "ichiFuture", "ichiSlope", "ichiWave", "ichiTime"] as const;
 export const SQ_FEATURES = ["sqPut", "sqCall"] as const;
-export const FEATURES = ["pain", "dPcr", "dIv", "skew", "wallPos", "basis", "weekly", "momentum", "fgNikkei", "fgCnn", ...ICHI_FEATURES, ...SQ_FEATURES] as const;
+export const VI_FEATURES = ["viZ", "viChg"] as const;
+export const FEATURES = ["pain", "dPcr", "dIv", "skew", "wallPos", "basis", "weekly", "momentum", "fgNikkei", "fgCnn", ...ICHI_FEATURES, ...SQ_FEATURES, ...VI_FEATURES] as const;
 export type FeatureName = (typeof FEATURES)[number];
 export type Features = Record<FeatureName, number>;
 
@@ -35,6 +36,8 @@ export const FEATURE_LABEL: Record<FeatureName, string> = {
   ichiTime: "一目: 時間論(変化日)",
   sqPut: "踏み上げ恐怖: プット売り手",
   sqCall: "踏み上げ恐怖: コール売り手",
+  viZ: "日経VI: 50日平均からの乖離",
+  viChg: "日経VI: 前日比",
 };
 
 /** 事前仮説(学習前の重み)。切片 + 各特徴量 */
@@ -54,6 +57,8 @@ export const PRIOR: { bias: number } & Features = {
   ichiTk: 0, ichiCloud: 0, ichiChikou: 0, ichiFuture: 0, ichiSlope: 0, ichiWave: 0, ichiTime: 0,
   // 踏み上げ恐怖指数: 順張り(投げが下げを加速)か逆張り(恐怖のピークで反転)かは実績で判断
   sqPut: 0, sqCall: 0,
+  // 日経VI: 高い・急上昇は恐怖の高まり(逆張りで反発か、順張りで続落か)は実績で判断
+  viZ: 0, viChg: 0,
 };
 export const RIDGE = 4; // 事前仮説への引き戻しの強さ
 export const TRADING_DAYS = 245;
@@ -94,6 +99,8 @@ export function features(a: DailyAnalysis, weeklyScore: number | null, fg: Senti
     fgCnn: clip(fg.cnn != null ? (fg.cnn - 50) / 25 : 0),
     ...ichiFeatures(ichi),
     ...sqFeatures(a.squeeze ? { put: a.squeeze.put.index, call: a.squeeze.call.index } : null),
+    viZ: clip(a.vi?.z50 ?? 0),
+    viChg: clip(a.vi?.chg != null ? a.vi.chg / 2 : 0),
   };
 }
 

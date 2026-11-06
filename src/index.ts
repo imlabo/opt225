@@ -8,6 +8,7 @@ interface IchimokuLatest { tradeDate: string; close: number; ichimoku: IchimokuP
 import { decodeJpx, parseWeeklyCsv } from "./jpx";
 import { analyzeAndPost, ingestDaily, ingestManual, rebuildSqueeze, runPipeline, tryTweet, weeklyWeights } from "./pipeline";
 import { composeAlertTweet } from "./x";
+import type { ViPoint } from "./vi";
 import type { WeeklyReport, WeeklyWeights } from "./weekly-tuning";
 import { COOLDOWN_MIN, composeMail, detect, levelsFrom, parseIntraday, scanClimax, sendMail, SYMBOL, TIMEFRAMES, type AlertLogItem, type AlertState, type Signal } from "./alerts";
 import type { SqueezeHist } from "./squeeze";
@@ -32,13 +33,14 @@ app.get("/", async (c) => {
   ]);
   const weeklyReport = await loadMeta<WeeklyReport>(c.env, "weekly_tuning");
   const alertLog = (await loadMeta<AlertLogItem[]>(c.env, "alert_log")) ?? [];
+  const viHist = (await loadMeta<ViPoint[]>(c.env, "vi_hist")) ?? [];
   const ichimoku = latestIchi && (!dl?.ichimoku || latestIchi.tradeDate > dl.ichimoku.result.date)
     ? { ...latestIchi.ichimoku, basis: dl?.ichimoku?.basis ?? 0 }
     : dl?.ichimoku;
   c.header("Cache-Control", "public, max-age=300");
   return c.html(renderPage({
     latest: history[history.length - 1], history, week: weeks[0], siteUrl: c.env.SITE_URL,
-    daily: { latest: dl, history: dailyHistory, strikes, squeezeHist: squeezeHist ?? [], alertLog }, ichimoku,
+    daily: { latest: dl, history: dailyHistory, strikes, squeezeHist: squeezeHist ?? [], alertLog, viHist }, ichimoku,
     model: { prediction, recent, logs, config: modelConfig ?? DEFAULT_CONFIG, tuning: tuningLog ?? [] },
     weekly: weeklyReport ?? undefined,
     sentiment,
@@ -59,6 +61,7 @@ app.get("/api/model/config", async (c) => {
   const [config, log] = await Promise.all([loadMeta<ModelConfig>(c.env, "model_config"), loadMeta<TuningReport[]>(c.env, "model_tuning_log")]);
   return c.json({ config: config ?? DEFAULT_CONFIG, log: log ?? [] });
 });
+app.get("/api/vi", async (c) => c.json((await loadMeta<ViPoint[]>(c.env, "vi_hist")) ?? []));
 app.get("/api/squeeze", async (c) => c.json((await loadMeta<SqueezeHist[]>(c.env, "squeeze_hist")) ?? []));
 app.get("/api/sentiment", async (c) => c.json(await loadSentiment(c.env, Number(c.req.query("days") ?? 365))));
 app.get("/api/prediction/latest", async (c) => c.json(await loadLatestPrediction(c.env)));

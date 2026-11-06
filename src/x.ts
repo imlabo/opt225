@@ -109,16 +109,21 @@ export function composeDailyTweet(a: DailyAnalysis, _siteUrl: string, p?: Predic
     `${m}(SQまで${a.front.days}日)`,
     a.putWall && a.callWall ? `建玉の壁 下${yen(a.putWall.strike)} / 上${yen(a.callWall.strike)}` : "",
     a.maxPain ? `最大苦痛 ${yen(a.maxPain)} / P/C比 ${a.pcr.toFixed(2)}` : `P/C比 ${a.pcr.toFixed(2)}`,
-    fg && (fg.nikkei != null || fg.cnn != null) ? `F&G 日経${fg.nikkei != null ? Math.round(fg.nikkei) : "—"} / 米国${fg.cnn != null ? Math.round(fg.cnn) : "—"}` : "",
+    fg && (fg.nikkei != null || fg.cnn != null) ? `F&G 日経${fg.nikkei != null ? Math.round(fg.nikkei) : "—"} / 米国${fg.cnn != null ? Math.round(fg.cnn) : "—"}${a.vi ? ` / 日経VI ${a.vi.value.toFixed(1)}${a.vi.chg != null ? `(${a.vi.chg >= 0 ? "+" : ""}${a.vi.chg.toFixed(1)})` : ""}` : ""}` : a.vi ? `日経VI ${a.vi.value.toFixed(1)}` : "",
     a.squeeze ? `踏み上げ恐怖 P${Math.round(a.squeeze.put.index)} / C${Math.round(a.squeeze.call.index)}${a.greeks ? ` / 売り手ヘッジ ${a.greeks.hedge >= 0 ? "買" : "売"}${yen(Math.abs(a.greeks.hedge))}枚` : ""}` : "",
     p ? `総合判断: ${callLabel(p.call)}(上昇確率${Math.round(p.pUp * 100)}%) ${yen(p.rangeLo)}〜${yen(p.rangeHi)}` : "",
     last && last.call !== "flat" ? `前回: ${callLabel(last.call)}→${last.up ? "上昇" : "下落"}${(last.call === "up") === last.up ? "◯" : "×"}` : "",
     "※機械的推計・投資助言ではありません",
     "#日経225オプション",
   ].filter(Boolean);
-  let text = lines.join("\n");
-  if (weightedLength(text) > 280) text = lines.filter((l) => !l.startsWith("#")).join("\n");
-  return text;
+  // 280(全角は2)に収まるまで、優先度の低い行から外す
+  const dropOrder = [(l: string) => l.startsWith("#"), (l: string) => l.startsWith("前回:"), (l: string) => l.startsWith("踏み上げ恐怖"), (l: string) => /^\d+月限\(SQ/.test(l), (l: string) => l.startsWith("F&G") || l.startsWith("日経VI")];
+  let keep = lines;
+  for (const drop of dropOrder) {
+    if (weightedLength(keep.join("\n")) <= 280) break;
+    keep = keep.filter((l) => !drop(l));
+  }
+  return keep.join("\n");
 }
 
 /** 天井・大底候補アラートの投稿文 */

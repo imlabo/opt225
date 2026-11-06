@@ -14,6 +14,7 @@ import type { IchimokuPayload } from "../src/daily.ts";
 import { sqFeatures, type Features } from "../src/model.ts";
 import type { SqueezeHist } from "../src/squeeze.ts";
 import { DEFAULT_CONFIG, priorWith, tune, type ModelConfig, type Sample } from "../src/tuning.ts";
+import { viHistory, viStats } from "../src/vi.ts";
 import { tuneWeekly, weeklyOutcomes, WEEKLY_PRIOR, type WeeklyWeights } from "../src/weekly-tuning.ts";
 import type { Investor } from "../src/types.ts";
 
@@ -112,6 +113,11 @@ if (input) input.ichimoku = ichimoku;
 try {
   const prices = parseNikkeiCsv(nkText);
   const vi = parseNikkeiCsv(decodeSjis(new Uint8Array(await (await get(VI_CSV)).arrayBuffer())));
+  if (input) {
+    input.vi = viStats(vi, input.tradeDate) ?? undefined;
+    input.viHist = viHistory(vi, parseNikkeiCsv(nkText).concat(merged.bars.map((b) => ({ date: b.date, value: b.close }))), input.tradeDate);
+    console.log(`VI ${input.vi?.date} ${input.vi?.value} (chg ${input.vi?.chg?.toFixed(2)}, z50 ${input.vi?.z50?.toFixed(2)}, pct1y ${input.vi?.pct1y?.toFixed(0)})`);
+  }
   // 日経 CSV がまだ当日分を含まない場合は Yahoo の終値、無ければ JPX の原資産価格で補う
   for (const b of merged.bars) if (prices.length && b.date > prices[prices.length - 1].date) prices.push({ date: b.date, value: b.close });
   if (input && prices.length && prices[prices.length - 1].date < input.tradeDate) prices.push({ date: input.tradeDate, value: input.spot });

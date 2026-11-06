@@ -95,6 +95,8 @@ export async function analyzeAndPost(env: Env, forcePost = false) {
 export async function ingestDaily(env: Env, d: DailyInput, forcePost = false) {
   const [prev] = (await loadDailyAnalyses(env, 1, d.tradeDate)).slice(-1);
   const a = analyzeDaily(d, prev);
+  if (d.vi) a.vi = d.vi;
+  if (d.viHist?.length) await saveMeta(env, "vi_hist", d.viHist);
   // 踏み上げ恐怖指数: 期近の建玉と前日分析から生値 → 過去の履歴と比べて点数化
   try {
     const raw = squeezeRaw(a, prev, d.strikes.filter((s) => s.month === a.front.month));

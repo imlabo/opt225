@@ -1,5 +1,6 @@
 import type { DailyAnalysis, DailyStrike } from "./daily";
 import type { AlertLogItem } from "./alerts";
+import type { ViPoint } from "./vi";
 import { MIN_HISTORY, SQ_KEYS, SQ_LABEL, type Side, type SqKey, type SqueezeHist, type SqueezeSide } from "./squeeze";
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
@@ -311,6 +312,42 @@ tabs.addEventListener("click",function(e){var b=e.target.closest("button");if(!b
 load();timer=setInterval(load,5*60*1000);
 })();`;
 
+/** 日経VI: 現在値・統計と、日経平均と重ねた推移チャート */
+function viSection(a: DailyAnalysis, hist: ViPoint[]): string {
+  const v = a.vi;
+  if (!v && !hist.length) return "";
+  const h = hist.filter((p) => p.vi > 0);
+  let chart = "";
+  if (h.length > 5) {
+    const W = 720, H = 240, P = 40;
+    const vMax = Math.max(...h.map((p) => p.vi)) * 1.05, vMin = Math.min(...h.map((p) => p.vi)) * 0.95;
+    const nks = h.map((p) => p.nk).filter((x): x is number => x != null);
+    const nMax = Math.max(...nks), nMin = Math.min(...nks);
+    const x = (i: number) => P + (i / (h.length - 1)) * (W - 2 * P);
+    const yv = (val: number) => 10 + ((vMax - val) / (vMax - vMin)) * (H - 40);
+    const yn = (val: number) => 10 + ((nMax - val) / (nMax - nMin || 1)) * (H - 40);
+    const viPath = h.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${yv(p.vi).toFixed(1)}`).join("");
+    let nkPath = "", started = false;
+    h.forEach((p, i) => { if (p.nk == null) return; nkPath += `${started ? "L" : "M"}${x(i).toFixed(1)},${yn(p.nk).toFixed(1)}`; started = true; });
+    const grid = [20, 25, 30, 35, 40, 50, 60].filter((g) => g > vMin && g < vMax).map((g) => `<line x1="${P}" x2="${W - P}" y1="${yv(g)}" y2="${yv(g)}" class="grid"/><text x="2" y="${yv(g) + 4}">${g}</text>`).join("");
+    const ticks = h.map((p, i) => (i % Math.ceil(h.length / 6) === 0 ? `<text x="${x(i)}" y="${H - 8}" text-anchor="middle">${p.date.slice(2, 7).replace("-", "/")}</text>` : "")).join("");
+    const last = h[h.length - 1];
+    chart = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="日経VIと日経平均">${grid}
+      <path d="${nkPath}" class="vi-nk"/><path d="${viPath}" class="vi-line"/>
+      <circle cx="${x(h.length - 1)}" cy="${yv(last.vi)}" r="3" class="vi-dot"/><text x="${x(h.length - 1) - 4}" y="${yv(last.vi) - 6}" text-anchor="end" class="vi-t">${last.vi.toFixed(1)}</text>
+      ${ticks}<text x="${W - P}" y="${H - 22}" text-anchor="end"><tspan class="vi-t">━ 日経VI(左目盛)</tspan>　<tspan class="vi-nk-t">┄ 日経平均(右・目盛なし)</tspan></text></svg>`;
+  }
+  const lvl = (val: number) => (val >= 40 ? "パニック水準" : val >= 30 ? "警戒水準" : val >= 20 ? "平常" : "低水準(楽観)");
+  const kpis = v ? `<div class="kpis">
+      <div class="kpi"><span>日経VI(${v.date.slice(5).replace("-", "/")})</span><strong>${v.value.toFixed(2)}</strong><small>${lvl(v.value)}${v.chg != null ? ` / 前日比 ${signed(v.chg, 2)}` : ""}</small></div>
+      <div class="kpi"><span>50日平均との差</span><strong>${v.ma50 != null ? signed(v.value - v.ma50, 1) : "—"}</strong><small>${v.ma50 != null ? `50日平均 ${v.ma50.toFixed(1)}${v.z50 != null ? ` / 乖離 ${signed(v.z50, 1)}σ` : ""}` : ""}</small></div>
+      <div class="kpi"><span>過去1年での位置</span><strong>${v.pct1y != null ? `${Math.round(v.pct1y)}%` : "—"}</strong><small>${v.min1y != null && v.max1y != null ? `1年のレンジ ${v.min1y.toFixed(1)}〜${v.max1y.toFixed(1)}` : ""}</small></div>
+      ${a.atmIv != null ? `<div class="kpi"><span>期近 ATM IV との差</span><strong>${signed(a.atmIv - v.value, 1)}</strong><small>ATM IV ${a.atmIv.toFixed(1)}% − 日経VI。プラスは期近が割高(目先の警戒)</small></div>` : ""}
+    </div>` : "";
+  return `<h4>日経VI(日経平均ボラティリティー・インデックス)</h4>${kpis}${chart}
+    <p class="muted small">日経VIは、日経225オプションの価格から計算される「今後1か月の日経平均の予想変動率(年率%)」で、市場の恐怖の度合いを表します。20前後が平常、30を超えると警戒、40を超えるとパニック的な局面です。VIが急上昇した後のピークは、相場の底と重なることが多い一方、上昇が続く間は下げが加速しやすくなります。50日平均からの乖離と前日比を予測モデルの材料に加え、効き方は毎日の自動見直しで判断しています。データは日経公式(日次)。</p>`;
+}
+
 /** 最近のアラート */
 function alertsSection(log: AlertLogItem[]): string {
   const items = [...log].slice(-15).reverse();
@@ -324,7 +361,7 @@ function alertsSection(log: AlertLogItem[]): string {
   return `<h4>最近のアラート</h4>${rows ? `<div class="table-wrap"><table><thead><tr><th>時刻(JST)</th><th>種類</th><th>時間足</th><th>内容</th><th>メール</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<p class="muted small">まだアラートはありません。大底・天井候補(出来高を伴う急落・急騰 × 売り手の損益分岐)と、ファーOTM のプット・コールの急騰・急落(前日比 2倍以上/0.5倍以下)が出るとここに載り、メールで通知します。</p>`}`;
 }
 
-export function renderDailySection(a: DailyAnalysis | undefined, history: DailyAnalysis[], strikes: DailyStrike[], squeezeHist: SqueezeHist[] = [], alertLog: AlertLogItem[] = []): string {
+export function renderDailySection(a: DailyAnalysis | undefined, history: DailyAnalysis[], strikes: DailyStrike[], squeezeHist: SqueezeHist[] = [], alertLog: AlertLogItem[] = [], viHist: ViPoint[] = []): string {
   if (!a) return "";
   const m = `${a.front.month.slice(0, 4)}年${Number(a.front.month.slice(4))}月限`;
   const dPcr = a.prev ? a.pcr - a.prev.pcr : null;
@@ -346,6 +383,7 @@ export function renderDailySection(a: DailyAnalysis | undefined, history: DailyA
     <p class="comment">${esc(a.comment)}</p>
     ${intradaySection(a)}
     ${alertsSection(alertLog)}
+    ${viSection(a, viHist)}
     <h4>行使価格別 建玉(${esc(m)}, 500円刻み)</h4>
     ${oiChart(a, strikes)}
     ${squeezeSection(a, squeezeHist)}
@@ -366,6 +404,7 @@ svg tspan.sp-put-t{fill:var(--down)}svg tspan.sp-call-t{fill:var(--up)}.be{strok
 details.explain{margin:10px 0;padding:8px 12px;border:1px solid var(--line,#8883);border-radius:10px;font-size:13px;line-height:1.7}
 details.explain summary{cursor:pointer;font-weight:700}details.explain dt{font-weight:700;margin-top:10px}details.explain dd{margin:2px 0 0 0}
 details.explain dd p{margin:2px 0}details.explain .today{color:var(--fg);background:#8881;border-radius:6px;padding:2px 6px}
+.vi-line{fill:none;stroke:#d946ef;stroke-width:2}.vi-nk{fill:none;stroke:var(--muted);stroke-width:1;stroke-dasharray:3 3}.vi-dot{fill:#d946ef}svg text.vi-t,svg tspan.vi-t{fill:#d946ef}svg tspan.vi-nk-t{fill:var(--muted)}
 .tf-tabs{display:flex;gap:6px;align-items:center;margin:8px 0}.tf-tabs button{border:1px solid #8886;background:transparent;color:var(--fg);padding:4px 10px;border-radius:6px;cursor:pointer;font-size:13px}.tf-tabs button.on{background:#0ea5e9;border-color:#0ea5e9;color:#fff}
 .tf-chart svg{width:100%;height:auto}.tf-vu{fill:var(--up);opacity:.35}.tf-vd{fill:var(--down);opacity:.35}.tf-lv{stroke:#eab308;stroke-dasharray:6 3;stroke-width:1.2}svg text.tf-lv-t{fill:#eab308;font-size:10px}svg text.tf-last{fill:var(--fg);font-size:11px;font-weight:700}
 svg text.tf-mk{font-size:9px}svg text.tf-mk-near{font-size:15px;font-weight:700}svg text.tf-mk-b{fill:#22c55e}svg text.tf-mk-t{fill:#ef4444}
@@ -374,6 +413,7 @@ svg text.tf-mk{font-size:9px}svg text.tf-mk-near{font-size:15px;font-weight:700}
 .sq-wrap{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:10px 0}@media(max-width:720px){details.explain{margin:10px 0;padding:8px 12px;border:1px solid var(--line,#8883);border-radius:10px;font-size:13px;line-height:1.7}
 details.explain summary{cursor:pointer;font-weight:700}details.explain dt{font-weight:700;margin-top:10px}details.explain dd{margin:2px 0 0 0}
 details.explain dd p{margin:2px 0}details.explain .today{color:var(--fg);background:#8881;border-radius:6px;padding:2px 6px}
+.vi-line{fill:none;stroke:#d946ef;stroke-width:2}.vi-nk{fill:none;stroke:var(--muted);stroke-width:1;stroke-dasharray:3 3}.vi-dot{fill:#d946ef}svg text.vi-t,svg tspan.vi-t{fill:#d946ef}svg tspan.vi-nk-t{fill:var(--muted)}
 .tf-tabs{display:flex;gap:6px;align-items:center;margin:8px 0}.tf-tabs button{border:1px solid #8886;background:transparent;color:var(--fg);padding:4px 10px;border-radius:6px;cursor:pointer;font-size:13px}.tf-tabs button.on{background:#0ea5e9;border-color:#0ea5e9;color:#fff}
 .tf-chart svg{width:100%;height:auto}.tf-vu{fill:var(--up);opacity:.35}.tf-vd{fill:var(--down);opacity:.35}.tf-lv{stroke:#eab308;stroke-dasharray:6 3;stroke-width:1.2}svg text.tf-lv-t{fill:#eab308;font-size:10px}svg text.tf-last{fill:var(--fg);font-size:11px;font-weight:700}
 svg text.tf-mk{font-size:9px}svg text.tf-mk-near{font-size:15px;font-weight:700}svg text.tf-mk-b{fill:#22c55e}svg text.tf-mk-t{fill:#ef4444}

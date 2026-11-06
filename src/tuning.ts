@@ -8,7 +8,7 @@
  *  - 方向を明示するしきい値: 上昇確率が何%以上(以下)なら買い(売り)と言うか(実績の損益で選ぶ)
  * サンプルが少ないうちは過剰適合を避けるため、件数と改善幅の条件を満たすまで切り替えない。
  */
-import { CALL_THRESHOLD, FEATURES, FEATURE_LABEL, ICHI_FEATURES, PRIOR, RIDGE, SQ_FEATURES, fit, predictProb, type FeatureName, type Features, type Weights } from "./model";
+import { CALL_THRESHOLD, FEATURES, FEATURE_LABEL, ICHI_FEATURES, PRIOR, RIDGE, SQ_FEATURES, VI_FEATURES, fit, predictProb, type FeatureName, type Features, type Weights } from "./model";
 
 export const GROUPS = {
   options: { label: "オプション建玉(苦痛価格・P/C・IV・スキュー・壁・先物)", features: ["pain", "dPcr", "dIv", "skew", "wallPos", "basis"] },
@@ -17,6 +17,7 @@ export const GROUPS = {
   sentiment: { label: "Fear & Greed", features: ["fgNikkei", "fgCnn"] },
   ichimoku: { label: "一目均衡表", features: [...ICHI_FEATURES] },
   squeeze: { label: "踏み上げ恐怖指数", features: [...SQ_FEATURES] },
+  vi: { label: "日経VI", features: [...VI_FEATURES] },
 } as const satisfies Record<string, { label: string; features: readonly FeatureName[] }>;
 export type Group = keyof typeof GROUPS;
 export const GROUP_KEYS = Object.keys(GROUPS) as Group[];

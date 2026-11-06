@@ -45,7 +45,7 @@ JPX「投資部門別取引状況」週次 CSV `Tousi_DV_W_YYYYMMDD_YYYYMMDD.csv
 | Secret | `X_API_KEY` / `X_API_SECRET` | X Developer Portal の API Key / Secret |
 | Secret | `X_ACCESS_TOKEN` / `X_ACCESS_SECRET` | 投稿アカウントの Access Token / Secret(Read and Write) |
 | Secret | `GH_DISPATCH_TOKEN` | GitHub の fine-grained personal access token(このリポジトリのみ、Permissions: Actions = Read and write)。Worker の Cron が引け後に daily ワークフローを起動するのに使う |
-| Variable | `SITE_URL` | 公開 URL(投稿文に載る) |
+| Variable | `SITE_URL` | 公開 URL(メール本文に載る。X 投稿には URL を含めない: URL 付き投稿は API 料金が高いため) |
 | Variable | `X_POST_ENABLED` | `true` で実投稿(週次サマリー・日次サマリー・天井/大底候補アラート・ファーOTM 急騰急落)。未設定・`false` の間は `posts` に `dry_run` として記録のみ |
 
 デプロイ後、Cron(木・金 16:30 JST)が自動で取得・分析・投稿します。すぐに初回データを入れる場合:
@@ -109,6 +109,9 @@ CSV(約4MB)と Excel の解析は Workers 無料枠の CPU 時間(10ms)に収ま
 4. ボラ追い打ち: ATM IV とスキューの前日比(プット側は IV+スキュー、コール側は IV−スキュー)
 5. 買い戻しの痕跡: 踏まれる方向に動いた日の、現値 ±1σ の建玉の減少率
 履歴が 60 営業日たまるまでは固定の目安(50+50·tanh)で、以後は過去 250 日の中でのパーセンタイルで点数化。履歴は `fg_meta` の `squeeze_hist` に保存し、デプロイ時に `POST /admin/rebuild-squeeze` で保存済み日次データから作り直す。公開 API: `GET /api/squeeze`
+
+## 日経VI (`src/vi.ts`)
+日経公式の日経VI(日次)から、現在値・前日比・50日平均と乖離(σ)・過去1年での位置を計算し、日経平均と重ねた約1年の推移チャートを日次セクションに表示(`GET /api/vi`)。50日平均からの乖離と前日比は予測モデルの特徴量(グループ「日経VI」)に入れ、効き方は毎日の自動見直しで判断する。日次の X 投稿にも VI を載せる。
 
 ## 天井・大底候補アラート (`src/alerts.ts`)
 Worker の Cron(毎分)で日経225先物(CME NKD=F, Yahoo Finance)の 5分足・15分足・60分足を取得し、最新の足(進行中の足は経過時間で出来高・値幅を按分して「速報」として判定。最後の足が時間足の 2 倍より古ければ判定しない)が「出来高 ≥ 直近20本平均の 2 倍、値幅 ≥ 平均の 1.5 倍、安値引け(高値引け)」で、かつプット売り手(コール売り手)の損益分岐(先物換算)から 0.8% 以内またはまたいだときに、大底候補(天井候補)としてメール通知(Resend)。同じ時間足・向きは 120 分あける。

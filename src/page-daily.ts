@@ -267,10 +267,10 @@ function intradaySection(a: DailyAnalysis): string {
   const be = a.seller;
   const basis = a.fut ? a.fut.price - a.spot : 0;
   const lv = (v: number | null | undefined) => (v != null ? yen(v + basis) : "—");
-  return `<h4>日経225先物 分足チャート <small class="muted">CME NKD=F(Yahoo Finance)、損益分岐は先物換算</small></h4>
+  return `<h4>日経225 分足チャート <small class="muted">XS の MT5 から届いていればリアルタイム、なければ CME NKD=F(Yahoo Finance、10〜20分遅れることあり)。損益分岐はその価格水準に換算</small></h4>
     <div class="tf-tabs" id="tf-tabs"><button data-tf="5m" class="on">5分足</button><button data-tf="15m">15分足</button><button data-tf="60m">60分足</button><span class="muted small" id="tf-status">読み込み中…</span></div>
     <div id="tf-chart" class="tf-chart"></div>
-    <p class="muted small">黄色の破線 = プット売り手の損益分岐 ${lv(be?.putBreakeven)}、コール売り手の損益分岐 ${lv(be?.callBreakeven)}(${a.tradeDate} の建玉から)。▲▼ = 出来高が直近20本平均の2倍以上かつ値幅1.5倍以上のクライマックス足(安値引け=▼、高値引け=▲)。損益分岐の近く(0.8%以内)で出たものは大きく表示し、その時点でメール通知しています。5分ごとに自動更新。</p>
+    <p class="muted small">黄色の破線 = プット売り手の損益分岐 ${lv(be?.putBreakeven)}、コール売り手の損益分岐 ${lv(be?.callBreakeven)}(${a.tradeDate} の建玉から)。▲▼ = 出来高が直近20本平均の2倍以上かつ値幅1.5倍以上のクライマックス足(安値引け=▼、高値引け=▲)。損益分岐の近く(0.8%以内)で出たものは大きく表示し、その時点でメール通知しています。1分ごとに自動更新。</p>
     <script>${INTRADAY_JS}</script>`;
 }
 
@@ -305,11 +305,11 @@ function draw(d){
   if(lv.callLevel!=null&&lv.callLevel>lo&&lv.callLevel<hi)s+='<line x1="'+P+'" x2="'+(W-10)+'" y1="'+y(lv.callLevel)+'" y2="'+y(lv.callLevel)+'" class="tf-lv"/><text x="'+(P+4)+'" y="'+(y(lv.callLevel)-3)+'" class="tf-lv-t">コール損益分岐 '+yen(lv.callLevel)+'</text>';
   var last=bars[bars.length-1];s+='<text x="'+(W-12)+'" y="'+(y(last.close)+4)+'" text-anchor="end" class="tf-last">'+yen(last.close)+'</text>';
   s+='</svg>';el.innerHTML=s;
-  st.textContent=d.label+" 最新 "+jst(last.t)+" "+yen(last.close)+(lv.putLevel!=null?"　プット損益分岐まで "+(((last.close-lv.putLevel)/last.close)*100).toFixed(2)+"%":"")+(lv.callLevel!=null?"　コール損益分岐まで +"+(((lv.callLevel-last.close)/last.close)*100).toFixed(2)+"%":"");
+  st.textContent=(d.source==="mt5"?"XS MT5 "+d.symbol+"(リアルタイム) ":"CME "+d.symbol+"(Yahoo・遅延あり) ")+d.label+" 最新 "+jst(last.t)+" "+yen(last.close)+(lv.putLevel!=null?"　プット損益分岐まで "+(((last.close-lv.putLevel)/last.close)*100).toFixed(2)+"%":"")+(lv.callLevel!=null?"　コール損益分岐まで +"+(((lv.callLevel-last.close)/last.close)*100).toFixed(2)+"%":"");
 }
 function load(){st.textContent="読み込み中…";fetch("/api/intraday?tf="+cur).then(function(r){return r.json()}).then(function(d){if(d.error){st.textContent="取得失敗: "+d.error;return}draw(d)}).catch(function(e){st.textContent="取得失敗: "+e})}
 tabs.addEventListener("click",function(e){var b=e.target.closest("button");if(!b)return;cur=b.getAttribute("data-tf");Array.prototype.forEach.call(tabs.querySelectorAll("button"),function(x){x.classList.toggle("on",x===b)});load()});
-load();timer=setInterval(load,5*60*1000);
+load();timer=setInterval(load,60*1000);
 })();`;
 
 /** 日経VI: 現在値・統計と、日経平均と重ねた推移チャート */

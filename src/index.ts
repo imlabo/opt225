@@ -10,7 +10,7 @@ import { analyzeAndPost, ingestDaily, ingestManual, rebuildSqueeze, runPipeline,
 import { composeAlertTweet } from "./x";
 import type { ViPoint } from "./vi";
 import type { WeeklyReport, WeeklyWeights } from "./weekly-tuning";
-import { COOLDOWN_BY_TF, composeMail, detect, levelsFrom, parseIntraday, scanClimax, sendMail, SYMBOL, TIMEFRAMES, type AlertLogItem, type AlertState, type Signal } from "./alerts";
+import { COOLDOWN_BY_TF, LOOKBACK, composeMail, detect, levelsFrom, parseIntraday, scanClimax, sendMail, SYMBOL, TIMEFRAMES, type AlertLogItem, type AlertState, type IBar, type Levels, type Signal, type Tf } from "./alerts";
 import type { SqueezeHist } from "./squeeze";
 import { DEFAULT_CONFIG, type ModelConfig, type TuningReport } from "./tuning";
 import { renderPage } from "./page";
@@ -175,6 +175,45 @@ app.post("/admin/clear-sample", async (c) => {
   return c.json({ ok: true });
 });
 
+/** MT5(XS)から VPS のスクリプトで送られてくる足。tf ごとに fg_meta "mt5_bars_<tf>" */
+interface PushedBars { symbol: string; receivedAt: number; bars: IBar[] }
+const MT5_FRESH_MS = 3 * 60 * 1000; // これより古ければ Yahoo に切り替え
+
+async function yahooBars(tf: Tf, range: string): Promise<IBar[]> {
+  const r = await fetch(`https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(SYMBOL)}?interval=${tf}&range=${range}`, { headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36", Accept: "application/json" } });
+  if (!r.ok) throw new Error(`Yahoo HTTP ${r.status}`);
+  return parseIntraday(await r.json());
+}
+
+/** MT5 の価格と先物(Yahoo NKD=F)の差: 同じ時刻の 5分足終値の差の中央値。CFD が現物連動でも先物連動でも損益分岐を合わせるため */
+async function mt5Offset(env: Env, mt5: IBar[]): Promise<number> {
+  const cached = await loadMeta<{ at: number; offset: number }>(env, "mt5_offset");
+  if (cached && Date.now() - cached.at < 30 * 60 * 1000) return cached.offset;
+  try {
+    const y = new Map((await yahooBars("5m", "2d")).map((b) => [b.t, b.close]));
+    const diffs = mt5.filter((b) => y.has(b.t)).map((b) => b.close - y.get(b.t)!).sort((a, b) => a - b);
+    if (diffs.length >= 5) {
+      const offset = diffs[Math.floor(diffs.length / 2)];
+      await saveMeta(env, "mt5_offset", { at: Date.now(), offset, n: diffs.length });
+      return offset;
+    }
+  } catch { /* Yahoo が取れなければ前回値 */ }
+  return cached?.offset ?? 0;
+}
+
+/** 足の取得: MT5 から新しい足が届いていればそれ(リアルタイム)、なければ Yahoo(10〜20 分遅れのことがある) */
+async function getBars(env: Env, tf: Tf, range: string): Promise<{ bars: IBar[]; source: "mt5" | "yahoo"; symbol: string; offset: number }> {
+  const p = await loadMeta<PushedBars>(env, `mt5_bars_${tf}`);
+  if (p && Date.now() - p.receivedAt < MT5_FRESH_MS && p.bars.length > LOOKBACK + 2) {
+    const m5 = tf === "5m" ? p.bars : (await loadMeta<PushedBars>(env, "mt5_bars_5m"))?.bars ?? p.bars;
+    return { bars: p.bars, source: "mt5", symbol: p.symbol, offset: await mt5Offset(env, m5) };
+  }
+  return { bars: await yahooBars(tf, range), source: "yahoo", symbol: SYMBOL, offset: 0 };
+}
+
+/** 損益分岐(先物換算)を MT5 の価格水準に合わせる */
+const shiftLevels = (lv: Levels, offset: number): Levels => (offset ? { ...lv, putLevel: lv.putLevel != null ? lv.putLevel + offset : null, callLevel: lv.callLevel != null ? lv.callLevel + offset : null } : lv);
+
 /** 天井・大底候補アラート: 先物の 5分/15分/60分足を取得して判定し、該当があればメール */
 async function runAlerts(env: Env, opts: { send?: boolean; force?: boolean } = {}): Promise<{ signals: Signal[]; sent?: boolean; note: string; mail?: unknown }> {
   const send = opts.send ?? true;
@@ -195,11 +234,9 @@ ${env.SITE_URL}`);
   else {
     for (const { tf, label, range } of TIMEFRAMES) {
       try {
-        const u = `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(SYMBOL)}?interval=${tf}&range=${range}`;
-        const r = await fetch(u, { headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36", Accept: "application/json" } });
-        if (!r.ok) { note += `${tf}: HTTP ${r.status}; `; checked[tf] = null; continue; }
-        const bars = parseIntraday(await r.json());
-        const d = detect(tf, label, bars, lv);
+        const src = await getBars(env, tf, range);
+        const d = detect(tf, src.source === "mt5" ? `${label}(MT5)` : label, src.bars, shiftLevels(lv, src.offset));
+        if (src.source === "mt5" && !note.includes("mt5")) note += "src mt5; ";
         checked[tf] = d.checked && { t: d.checked.t, close: d.checked.close, volRatio: 0 };
         if (d.signal) signals.push(d.signal);
       } catch (e) { note += `${tf}: ${String(e).slice(0, 80)}; `; checked[tf] = null; }
@@ -237,15 +274,38 @@ app.get("/api/alerts/check", async (c) => {
 app.get("/api/intraday", async (c) => {
   const tf = (TIMEFRAMES.find((t) => t.tf === c.req.query("tf")) ?? TIMEFRAMES[0]);
   try {
-    const r = await fetch(`https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(SYMBOL)}?interval=${tf.tf}&range=${tf.range}`, { headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36", Accept: "application/json" } });
-    if (!r.ok) return c.json({ error: `Yahoo HTTP ${r.status}` }, 502);
-    const bars = parseIntraday(await r.json()).filter((b) => b.volume > 0 || true);
+    const src = await getBars(c.env, tf.tf, tf.range);
     const [dl] = (await loadDailyAnalyses(c.env, 1)).slice(-1);
-    const lv = levelsFrom(dl);
-    c.header("Cache-Control", "public, max-age=60");
-    return c.json({ symbol: SYMBOL, tf: tf.tf, label: tf.label, bars: bars.slice(-400), levels: lv, climax: scanClimax(bars, lv) });
+    const base = levelsFrom(dl);
+    const lv = base && shiftLevels(base, src.offset);
+    c.header("Cache-Control", `public, max-age=${src.source === "mt5" ? 20 : 60}`);
+    return c.json({ symbol: src.symbol, source: src.source, tf: tf.tf, label: tf.label, bars: src.bars.slice(-400), levels: lv, climax: scanClimax(src.bars, lv) });
   } catch (e) { return c.json({ error: String(e).slice(0, 200) }, 500); }
 });
+/**
+ * MT5(XS)の足を受け取る(VPS の scripts/mt5_push.py から 20 秒ごと)。
+ * body: { symbol, bars: { "5m": [[t, o, h, l, c, v], ...], "15m": [...], "60m": [...] } }(t は UTC の UNIX 秒、v はティック出来高)
+ * 受け取ったらその場でアラート判定も行う(Cron の毎分を待たない)
+ */
+app.post("/admin/mt5-push", async (c) => {
+  const b = await c.req.json<{ symbol: string; bars: Partial<Record<Tf, number[][]>> }>();
+  if (!b?.symbol || !b.bars) return c.json({ error: "invalid body" }, 400);
+  const now = Date.now();
+  const saved: Record<string, number> = {};
+  for (const { tf } of TIMEFRAMES) {
+    const rows = b.bars[tf];
+    if (!Array.isArray(rows) || !rows.length) continue;
+    const bars: IBar[] = rows.slice(-400).map(([t, open, high, low, close, volume]) => ({ t, open, high, low, close, volume }))
+      .filter((x) => Number.isFinite(x.t) && x.high > 0 && x.low > 0);
+    // 時刻のずれ(サーバー時間のまま送られた等)を検出: 最新足が未来なら拒否
+    if (bars.length && bars[bars.length - 1].t * 1000 > now + 10 * 60 * 1000) return c.json({ error: `bar time is in the future (${tf}); send UTC epoch seconds` }, 400);
+    await saveMeta(c.env, `mt5_bars_${tf}`, { symbol: b.symbol, receivedAt: now, bars } satisfies PushedBars);
+    saved[tf] = bars.length;
+  }
+  c.executionCtx.waitUntil(runAlerts(c.env).then(() => undefined).catch(() => undefined));
+  return c.json({ ok: true, saved });
+});
+
 /** X 投稿の記録(直近。本文・状態・エラー) */
 app.get("/api/posts", async (c) => {
   const d = await c.env.DB.prepare("SELECT trade_date AS key, tweet_id, text, status, error, posted_at FROM daily_posts ORDER BY trade_date DESC LIMIT 5").all();
@@ -288,7 +348,12 @@ export default {
       let result = "";
       try {
         if (kind === "weekly") result = JSON.stringify(await runPipeline(env)).slice(0, 200);
-        else if (kind === "alerts") { const r = await runAlerts(env); result = JSON.stringify({ alerts: r.signals.length, sent: r.sent, note: r.note }); }
+        else if (kind === "alerts") {
+          // MT5 から足が届いている間は、受信時に判定しているので Cron 側は休む(二重判定を避ける)
+          const p = await loadMeta<PushedBars>(env, "mt5_bars_5m");
+          if (p && Date.now() - p.receivedAt < MT5_FRESH_MS) result = "skip (mt5 push active)";
+          else { const r = await runAlerts(env); result = JSON.stringify({ alerts: r.signals.length, sent: r.sent, note: r.note }); }
+        }
         else result = JSON.stringify(await dispatchDaily(env));
       } catch (e) {
         result = `error: ${String(e).slice(0, 200)}`;

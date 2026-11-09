@@ -100,3 +100,20 @@ describe("levelText", () => {
     expect(levelText("top", 63000, 63500)).toContain("上抜けています(-0.79%");
   });
 });
+
+describe("early-morning volume", () => {
+  it("does not flag the usual open-time volume surge", async () => {
+    const { detect, slotOf } = await import("../src/alerts");
+    const bars = mk(30, 61000);
+    const t = bars[28].t;
+    bars[28] = { t, open: 61000, high: 61010, low: 60600, close: 60620, volume: 3000 };
+    // その時間帯は毎日 4,000 前後出来る → 急増ではない
+    const prof = { [slotOf(t, "5m")]: 4000 };
+    expect(detect("5m", "5分足", bars, lv, (t + 6 * 60) * 1000, prof).signal).toBeNull();
+    expect(detect("5m", "5分足", bars, lv, (t + 6 * 60) * 1000).signal?.side).toBe("bottom");
+    // 取引の中断(2時間)直後の足は判定しない
+    const gap = mk(30, 61000).map((b, i) => (i >= 27 ? { ...b, t: b.t + 7200 } : b));
+    gap[28] = { ...gap[28], open: 61000, high: 61010, low: 60600, close: 60620, volume: 3000 };
+    expect(detect("5m", "5分足", gap, lv, (gap[28].t + 6 * 60) * 1000).signal).toBeNull();
+  });
+});

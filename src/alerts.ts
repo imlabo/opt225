@@ -79,20 +79,41 @@ export const MIN_ELAPSED = 0.3; // 進行中の足は、時間足の 30% 以上�
  *  - データが遅れて届いた確定足も、MAX_AGE_MIN 以内なら拾う(1本だけ見ていると取りこぼすため)
  *  - 水準: 大底候補はプット売り手の損益分岐の 0.8% 以内か、それより下(売り手が損失圏)。天井候補はその逆
  */
-export function detect(tf: Tf, label: string, bars: IBar[], lv: Levels, now = Date.now()): { signal: Signal | null; checked: IBar | null } {
+/** 時間帯ごとの平常出来高(UTC の時刻の枠 → 過去 20 日の中央値)。MT5 から送られてくる */
+export type VolProfile = Record<string, number>;
+export const tfMinutes = (tf: Tf) => (tf === "5m" ? 5 : tf === "15m" ? 15 : 60);
+export const slotOf = (t: number, tf: Tf) => String(Math.floor((t % 86400) / 60 / tfMinutes(tf)));
+/** 取引の中断(30 分以上の空白)の直後の何本かは判定しない(寄り付きの出来高急増を除外) */
+export const SKIP_AFTER_BREAK = 3;
+const afterBreak = (done: IBar[], idx: number) => {
+  for (let k = 0; k < SKIP_AFTER_BREAK && idx - k - 1 >= 0; k++) if (done[idx - k].t - done[idx - k - 1].t > 30 * 60) return true;
+  return false;
+};
+/**
+ * 出来高の比較基準: 直近 LOOKBACK 本の平均と、同じ時間帯の平常出来高(過去 20 日の中央値)の大きい方。
+ * 早朝・寄り付きなど毎日決まって出来高が膨らむ時間帯で、直近の静かな足と比べて「急増」と誤判定しないため
+ */
+const baseVolume = (prev: IBar[], bar: IBar, tf: Tf, profile?: VolProfile) => {
+  const avg = prev.reduce((s, b) => s + b.volume, 0) / prev.length;
+  const slot = profile?.[slotOf(bar.t, tf)];
+  return slot && slot > avg ? slot : avg;
+};
+
+export function detect(tf: Tf, label: string, bars: IBar[], lv: Levels, now = Date.now(), profile?: VolProfile): { signal: Signal | null; checked: IBar | null } {
   const done = bars.filter((b) => b.volume > 0);
   if (done.length < LOOKBACK + 2) return { signal: null, checked: null };
-  const tfMs = (tf === "5m" ? 5 : tf === "15m" ? 15 : 60) * 60 * 1000;
+  const tfMs = tfMinutes(tf) * 60 * 1000;
   const checked = done[done.length - 1];
   for (let idx = done.length - 1; idx >= LOOKBACK; idx--) {
     const bar = done[idx];
     const age = now - bar.t * 1000;
     if (age > MAX_AGE_MIN[tf] * 60 * 1000) break;
+    if (afterBreak(done, idx)) continue;
     const inProgress = age < tfMs;
     const elapsed = inProgress ? Math.max(0, Math.min(1, age / tfMs)) : 1;
     if (inProgress && elapsed < MIN_ELAPSED) continue;
     const prev = done.slice(idx - LOOKBACK, idx);
-    const avgVol = prev.reduce((s, b) => s + b.volume, 0) / prev.length;
+    const avgVol = baseVolume(prev, bar, tf, profile);
     const avgRange = prev.reduce((s, b) => s + (b.high - b.low), 0) / prev.length;
     if (!(avgVol > 0) || !(avgRange > 0)) continue;
     const range = bar.high - bar.low;
@@ -158,12 +179,13 @@ export interface AlertState { lastSent: Record<string, number>; lastRun?: { at: 
 export interface AlertLogItem { at: number; tf: Tf | "daily"; side: Signal["side"] | "far-up" | "far-down"; close: number; level: number; volRatio: number; sent: boolean; text?: string }
 
 /** 期間内のすべての足についてクライマックス判定(チャートのマーカー用)。level に近いものは near=true */
-export function scanClimax(bars: IBar[], lv: Levels | null): { t: number; side: "bottom" | "top"; near: boolean; volRatio: number }[] {
+export function scanClimax(bars: IBar[], lv: Levels | null, tf: Tf = "5m", profile?: VolProfile): { t: number; side: "bottom" | "top"; near: boolean; volRatio: number }[] {
   const out: { t: number; side: "bottom" | "top"; near: boolean; volRatio: number }[] = [];
   const done = bars.filter((b) => b.volume > 0);
   for (let i = LOOKBACK; i < done.length; i++) {
+    if (afterBreak(done, i)) continue;
     const bar = done[i], prev = done.slice(i - LOOKBACK, i);
-    const avgVol = prev.reduce((s, b) => s + b.volume, 0) / prev.length, avgRange = prev.reduce((s, b) => s + (b.high - b.low), 0) / prev.length;
+    const avgVol = baseVolume(prev, bar, tf, profile), avgRange = prev.reduce((s, b) => s + (b.high - b.low), 0) / prev.length;
     if (!(avgVol > 0) || !(avgRange > 0)) continue;
     const range = bar.high - bar.low, volRatio = bar.volume / avgVol;
     if (volRatio < VOL_MULT || range / avgRange < RANGE_MULT) continue;

@@ -10,7 +10,7 @@ import { analyzeAndPost, ingestDaily, ingestManual, rebuildSqueeze, runPipeline,
 import { composeAlertTweet } from "./x";
 import type { ViPoint } from "./vi";
 import type { WeeklyReport, WeeklyWeights } from "./weekly-tuning";
-import { COOLDOWN_BY_TF, LOOKBACK, composeMail, detect, levelsFrom, parseIntraday, scanClimax, sendMail, SYMBOL, TIMEFRAMES, type AlertLogItem, type AlertState, type IBar, type Levels, type Signal, type Tf } from "./alerts";
+import { COOLDOWN_BY_TF, LOOKBACK, composeMail, detect, levelsFrom, parseIntraday, scanClimax, sendMail, SYMBOL, TIMEFRAMES, type AlertLogItem, type AlertState, type IBar, type Levels, type Signal, type Tf, type VolProfile } from "./alerts";
 import type { SqueezeHist } from "./squeeze";
 import { DEFAULT_CONFIG, type ModelConfig, type TuningReport } from "./tuning";
 import { renderPage } from "./page";
@@ -202,11 +202,12 @@ async function mt5Offset(env: Env, mt5: IBar[]): Promise<number> {
 }
 
 /** 足の取得: MT5 から新しい足が届いていればそれ(リアルタイム)、なければ Yahoo(10〜20 分遅れのことがある) */
-async function getBars(env: Env, tf: Tf, range: string): Promise<{ bars: IBar[]; source: "mt5" | "yahoo"; symbol: string; offset: number }> {
+async function getBars(env: Env, tf: Tf, range: string): Promise<{ bars: IBar[]; source: "mt5" | "yahoo"; symbol: string; offset: number; profile?: VolProfile }> {
   const p = await loadMeta<PushedBars>(env, `mt5_bars_${tf}`);
   if (p && Date.now() - p.receivedAt < MT5_FRESH_MS && p.bars.length > LOOKBACK + 2) {
     const m5 = tf === "5m" ? p.bars : (await loadMeta<PushedBars>(env, "mt5_bars_5m"))?.bars ?? p.bars;
-    return { bars: p.bars, source: "mt5", symbol: p.symbol, offset: await mt5Offset(env, m5) };
+    const profile = (await loadMeta<{ profile: VolProfile }>(env, `mt5_vprof_${tf}`))?.profile;
+    return { bars: p.bars, source: "mt5", symbol: p.symbol, offset: await mt5Offset(env, m5), profile };
   }
   return { bars: await yahooBars(tf, range), source: "yahoo", symbol: SYMBOL, offset: 0 };
 }
@@ -235,7 +236,7 @@ ${env.SITE_URL}`);
     for (const { tf, label, range } of TIMEFRAMES) {
       try {
         const src = await getBars(env, tf, range);
-        const d = detect(tf, src.source === "mt5" ? `${label}(MT5)` : label, src.bars, shiftLevels(lv, src.offset));
+        const d = detect(tf, src.source === "mt5" ? `${label}(MT5)` : label, src.bars, shiftLevels(lv, src.offset), Date.now(), src.profile);
         if (src.source === "mt5" && !note.includes("mt5")) note += "src mt5; ";
         checked[tf] = d.checked && { t: d.checked.t, close: d.checked.close, volRatio: 0 };
         if (d.signal) signals.push(d.signal);
@@ -279,7 +280,7 @@ app.get("/api/intraday", async (c) => {
     const base = levelsFrom(dl);
     const lv = base && shiftLevels(base, src.offset);
     c.header("Cache-Control", `public, max-age=${src.source === "mt5" ? 20 : 60}`);
-    return c.json({ symbol: src.symbol, source: src.source, tf: tf.tf, label: tf.label, bars: src.bars.slice(-400), levels: lv, climax: scanClimax(src.bars, lv) });
+    return c.json({ symbol: src.symbol, source: src.source, tf: tf.tf, label: tf.label, bars: src.bars.slice(-400), levels: lv, climax: scanClimax(src.bars, lv, tf.tf, src.profile) });
   } catch (e) { return c.json({ error: String(e).slice(0, 200) }, 500); }
 });
 /**
@@ -288,7 +289,7 @@ app.get("/api/intraday", async (c) => {
  * 受け取ったらその場でアラート判定も行う(Cron の毎分を待たない)
  */
 app.post("/admin/mt5-push", async (c) => {
-  const b = await c.req.json<{ symbol: string; bars: Partial<Record<Tf, number[][]>> }>();
+  const b = await c.req.json<{ symbol: string; bars: Partial<Record<Tf, number[][]>>; profile?: Partial<Record<Tf, VolProfile>> }>();
   if (!b?.symbol || !b.bars) return c.json({ error: "invalid body" }, 400);
   const now = Date.now();
   const saved: Record<string, number> = {};
@@ -302,6 +303,11 @@ app.post("/admin/mt5-push", async (c) => {
     await saveMeta(c.env, `mt5_bars_${tf}`, { symbol: b.symbol, receivedAt: now, bars } satisfies PushedBars);
     saved[tf] = bars.length;
   }
+  // 時間帯ごとの平常出来高(10 分ごとに送られてくる)
+  for (const { tf } of TIMEFRAMES) {
+    const prof = b.profile?.[tf];
+    if (prof && Object.keys(prof).length) await saveMeta(c.env, `mt5_vprof_${tf}`, { at: now, profile: prof });
+  }
   c.executionCtx.waitUntil(runAlerts(c.env).then(() => undefined).catch(() => undefined));
   return c.json({ ok: true, saved });
 });
@@ -313,7 +319,8 @@ app.get("/api/mt5/status", async (c) => {
   for (const { tf } of TIMEFRAMES) {
     const p = await loadMeta<PushedBars>(c.env, `mt5_bars_${tf}`);
     const last = p?.bars[p.bars.length - 1];
-    out[tf] = p ? { symbol: p.symbol, receivedAgoSec: Math.round((Date.now() - p.receivedAt) / 1000), bars: p.bars.length, last } : null;
+    const prof = await loadMeta<{ at: number; profile: VolProfile }>(c.env, `mt5_vprof_${tf}`);
+    out[tf] = p ? { symbol: p.symbol, receivedAgoSec: Math.round((Date.now() - p.receivedAt) / 1000), bars: p.bars.length, last, profileSlots: prof ? Object.keys(prof.profile).length : 0, profileAgoMin: prof ? Math.round((Date.now() - prof.at) / 60000) : null } : null;
   }
   return c.json(out);
 });

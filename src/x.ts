@@ -1,3 +1,4 @@
+import { levelText } from "./alerts";
 import type { Analysis } from "./analysis";
 import type { DailyAnalysis } from "./daily";
 import type { Prediction } from "./model";
@@ -133,7 +134,7 @@ export function composeAlertTweet(sig: { tf: string; label: string; side: "botto
   const lines = [
     `【${s0.side === "bottom" ? "大底候補" : "天井候補"}${s0.inProgress ? "(速報)" : ""}】${jst(s0.bar.t)} ${sig.map((x) => x.label).join("・")}`,
     `日経225先物 ${yen(s0.bar.close)} 出来高${s0.volRatio.toFixed(1)}倍の${s0.side === "bottom" ? "下落" : "上昇"}`,
-    `${s0.side === "bottom" ? "プット" : "コール"}売り手の損益分岐 ${yen(s0.level)}${s0.crossed ? "をまたぐ" : `まで${(s0.distPct * 100).toFixed(1)}%`}`,
+    levelText(s0.side, s0.level, s0.bar.close).replace(/(\d)\.(\d)\d%/g, "$1.$2%"),
     "※機械的検出・投資助言ではありません",
     "#日経225先物",
   ];

@@ -91,3 +91,12 @@ describe("5m bottoms", () => {
     expect(detect("5m", "5分足", bars, lv, (t + 40 * 60) * 1000).signal).toBeNull();
   });
 });
+
+describe("levelText", () => {
+  it("shows a negative % and says the breakeven is broken", async () => {
+    const { levelText } = await import("../src/alerts");
+    expect(levelText("bottom", 59612, 58900)).toBe("プット売り手の損益分岐 59,612 を割れています(-1.21%、売り手は損失圏)");
+    expect(levelText("bottom", 59612, 60000)).toContain("まで あと 0.65%(下に)");
+    expect(levelText("top", 63000, 63500)).toContain("上抜けています(-0.79%");
+  });
+});

@@ -116,6 +116,18 @@ export function detect(tf: Tf, label: string, bars: IBar[], lv: Levels, now = Da
   return { signal: null, checked };
 }
 
+/**
+ * 損益分岐との位置関係の文言。余裕率 = プットは (現値 − 損益分岐) / 現値、コールは (損益分岐 − 現値) / 現値。
+ * マイナスは損益分岐を割れた(上抜けた)状態 = 売り手が損失圏
+ */
+export function levelText(side: "bottom" | "top", level: number, close: number): string {
+  const put = side === "bottom";
+  const d = ((put ? close - level : level - close) / close) * 100;
+  const who = put ? "プット売り手" : "コール売り手";
+  if (d < 0) return `${who}の損益分岐 ${yen(level)} を${put ? "割れています" : "上抜けています"}(${d.toFixed(2)}%、売り手は損失圏)`;
+  return `${who}の損益分岐 ${yen(level)} まで あと ${d.toFixed(2)}%(${put ? "下" : "上"}に)`;
+}
+
 const jst = (t: number) => new Date(t * 1000 + 9 * 3600 * 1000).toISOString().replace("T", " ").slice(5, 16) + " JST";
 const yen = (n: number) => Math.round(n).toLocaleString("ja-JP");
 
@@ -125,10 +137,10 @@ export function composeMail(signals: Signal[], lv: Levels, siteUrl: string): { s
   const subject = `【opt225】${s0.inProgress ? "速報 " : ""}${kind(s0)}: ${signals.map((s) => s.label).join("・")} 出来高急増の${s0.side === "bottom" ? "下落" : "上昇"} @ ${yen(s0.bar.close)}(${jst(s0.bar.t).slice(6, 11)}〜)`;
   const body = signals.map((s) => [
     `■ ${kind(s)}(${s.label}) ${jst(s.bar.t)} の足${s.inProgress ? `(進行中・${Math.round(s.elapsed * 100)}%経過時点の速報。出来高・値幅は経過時間で按分して判定)` : ""}`,
-    `  日経225先物(CME ${SYMBOL}) 始${yen(s.bar.open)} 高${yen(s.bar.high)} 安${yen(s.bar.low)} 終${yen(s.bar.close)}`,
+    `  ${s.label.includes("MT5") ? "日経225 CFD(XS MT5)" : `日経225先物(CME ${SYMBOL})`} 始${yen(s.bar.open)} 高${yen(s.bar.high)} 安${yen(s.bar.low)} 終${yen(s.bar.close)}`,
     `  出来高 ${yen(s.bar.volume)}(直近${LOOKBACK}本平均の ${s.volRatio.toFixed(1)}倍${s.inProgress ? "・按分後" : ""})、値幅 ${yen(s.bar.high - s.bar.low)}(平均の ${s.rangeRatio.toFixed(1)}倍)`,
     `  ${s.side === "bottom" ? "プット売り手の損益分岐" : "コール売り手の損益分岐"} ${yen(s.level)}(先物換算、日経平均ベース ${yen(s.side === "bottom" ? lv.putBreakeven! : lv.callBreakeven!)} + ベーシス ${lv.basis >= 0 ? "+" : ""}${yen(lv.basis)})`,
-    `  ${s.crossed ? "この足で損益分岐をまたぎました" : s.beyond ? `損益分岐を${s.side === "bottom" ? "下回った" : "上回った"}圏内(売り手が損失を抱えた状態、損益分岐から ${(Math.abs(s.bar.close - s.level) / s.bar.close * 100).toFixed(1)}%)` : `損益分岐まで ${(s.distPct * 100).toFixed(2)}%`}`,
+    `  ${levelText(s.side, s.level, s.bar.close)}${s.crossed ? "。この足で損益分岐をまたぎました" : ""}`,
   ].join("\n")).join("\n\n");
   const text = `${body}
 

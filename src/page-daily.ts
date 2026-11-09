@@ -305,8 +305,10 @@ function draw(d){
   if(lv.callLevel!=null&&lv.callLevel>lo&&lv.callLevel<hi)s+='<line x1="'+P+'" x2="'+(W-10)+'" y1="'+y(lv.callLevel)+'" y2="'+y(lv.callLevel)+'" class="tf-lv"/><text x="'+(P+4)+'" y="'+(y(lv.callLevel)-3)+'" class="tf-lv-t">コール損益分岐 '+yen(lv.callLevel)+'</text>';
   var last=bars[bars.length-1];s+='<text x="'+(W-12)+'" y="'+(y(last.close)+4)+'" text-anchor="end" class="tf-last">'+yen(last.close)+'</text>';
   s+='</svg>';el.innerHTML=s;
-  st.textContent=(d.source==="mt5"?"XS MT5 "+d.symbol+"(リアルタイム) ":"CME "+d.symbol+"(Yahoo・遅延あり) ")+d.label+" 最新 "+jst(last.t)+" "+yen(last.close)+(lv.putLevel!=null?"　プット損益分岐まで "+(((last.close-lv.putLevel)/last.close)*100).toFixed(2)+"%":"")+(lv.callLevel!=null?"　コール損益分岐まで +"+(((lv.callLevel-last.close)/last.close)*100).toFixed(2)+"%":"");
+  st.textContent=(d.source==="mt5"?"XS MT5 "+d.symbol+"(リアルタイム) ":"CME "+d.symbol+"(Yahoo・遅延あり) ")+d.label+" 最新 "+jst(last.t)+" "+yen(last.close)+lvTxt("put",lv.putLevel,last.close)+lvTxt("call",lv.callLevel,last.close);
 }
+function lvTxt(side,level,close){if(level==null)return"";var put=side==="put";var d=(put?close-level:level-close)/close*100;var who=put?"プット":"コール";
+  return d<0?"　"+who+"損益分岐 "+yen(level)+" を"+(put?"割れ":"上抜け")+"("+d.toFixed(2)+"%・売り手は損失圏)":"　"+who+"損益分岐 "+yen(level)+" まであと "+d.toFixed(2)+"%"}
 function load(){st.textContent="読み込み中…";fetch("/api/intraday?tf="+cur).then(function(r){return r.json()}).then(function(d){if(d.error){st.textContent="取得失敗: "+d.error;return}draw(d)}).catch(function(e){st.textContent="取得失敗: "+e})}
 tabs.addEventListener("click",function(e){var b=e.target.closest("button");if(!b)return;cur=b.getAttribute("data-tf");Array.prototype.forEach.call(tabs.querySelectorAll("button"),function(x){x.classList.toggle("on",x===b)});load()});
 load();timer=setInterval(load,60*1000);

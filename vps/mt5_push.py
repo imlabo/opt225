@@ -78,8 +78,16 @@ def volume_profile(symbol, offset):
 def main():
     if not TOKEN:
         sys.exit("環境変数 OPT225_ADMIN_TOKEN を設定してください")
-    if not mt5.initialize():
-        sys.exit(f"MT5 に接続できません: {mt5.last_error()}")
+    # 再起動直後は MT5 の起動・ログインに時間がかかるので、つながるまで待つ
+    mt5_path = os.environ.get("MT5_PATH")
+    def connect():
+        return mt5.initialize(path=mt5_path) if mt5_path else mt5.initialize()
+    while not connect():
+        print(time.strftime("%H:%M:%S"), f"MT5 に接続できません({mt5.last_error()})。30 秒後に再試行")
+        time.sleep(30)
+    while not mt5.account_info():
+        print(time.strftime("%H:%M:%S"), "MT5 のログイン待ち…")
+        time.sleep(15)
     symbol = find_symbol(sys.argv[1] if len(sys.argv) > 1 else None)
     mt5.symbol_select(symbol, True)
     print(f"{symbol} を {INTERVAL_SEC} 秒ごとに {SITE} へ送信します")

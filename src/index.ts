@@ -7,10 +7,10 @@ import type { DailyInput, IchimokuPayload } from "./daily";
 interface IchimokuLatest { tradeDate: string; close: number; ichimoku: IchimokuPayload }
 import { decodeJpx, parseWeeklyCsv } from "./jpx";
 import { analyzeAndPost, ingestDaily, ingestManual, rebuildSqueeze, runPipeline, tryTweet, weeklyWeights } from "./pipeline";
-import { composeAlertTweet } from "./x";
+import { composeAlertTweet, composeFollowTweet } from "./x";
 import type { ViPoint } from "./vi";
 import type { WeeklyReport, WeeklyWeights } from "./weekly-tuning";
-import { COOLDOWN_BY_TF, LOOKBACK, composeMail, detect, levelsFrom, parseIntraday, scanClimax, sendMail, SYMBOL, TIMEFRAMES, type AlertLogItem, type AlertState, type IBar, type Levels, type Signal, type Tf, type VolProfile } from "./alerts";
+import { COOLDOWN_BY_TF, LOOKBACK, FOLLOW_LABEL, composeFollowMail, detectLevelBreak, followUp, composeMail, detect, levelsFrom, parseIntraday, scanClimax, sendMail, SYMBOL, TIMEFRAMES, type AlertLogItem, type AlertState, type FollowSignal, type IBar, type Levels, type Pending, type Signal, type Tf, type VolProfile } from "./alerts";
 import type { SqueezeHist } from "./squeeze";
 import { DEFAULT_CONFIG, type ModelConfig, type TuningReport } from "./tuning";
 import { renderPage } from "./page";
@@ -216,7 +216,7 @@ async function getBars(env: Env, tf: Tf, range: string): Promise<{ bars: IBar[];
 const shiftLevels = (lv: Levels, offset: number): Levels => (offset ? { ...lv, putLevel: lv.putLevel != null ? lv.putLevel + offset : null, callLevel: lv.callLevel != null ? lv.callLevel + offset : null } : lv);
 
 /** 天井・大底候補アラート: 先物の 5分/15分/60分足を取得して判定し、該当があればメール */
-async function runAlerts(env: Env, opts: { send?: boolean; force?: boolean } = {}): Promise<{ signals: Signal[]; sent?: boolean; note: string; mail?: unknown }> {
+async function runAlerts(env: Env, opts: { send?: boolean; force?: boolean } = {}): Promise<{ signals: Signal[]; follows: FollowSignal[]; sent?: boolean; note: string; mail?: unknown }> {
   const send = opts.send ?? true;
   const state = (await loadMeta<AlertState>(env, "alert_state")) ?? { lastSent: {} };
   // メール設定が入った最初の実行で、テストメールを 1 通送って疎通を記録する
@@ -230,19 +230,42 @@ ${env.SITE_URL}`);
   const lv = levelsFrom(dl);
   const checked: NonNullable<AlertState["lastRun"]>["checked"] = {};
   const signals: Signal[] = [];
+  const follows: FollowSignal[] = [];
+  let pending = state.pending ?? [];
   let note = "";
   if (!lv) note = "no daily analysis";
   else {
     for (const { tf, label, range } of TIMEFRAMES) {
       try {
         const src = await getBars(env, tf, range);
-        const d = detect(tf, src.source === "mt5" ? `${label}(MT5)` : label, src.bars, shiftLevels(lv, src.offset), Date.now(), src.profile);
+        const lab = src.source === "mt5" ? `${label}(MT5)` : label;
+        const lvx = shiftLevels(lv, src.offset);
+        const d = detect(tf, lab, src.bars, lvx, Date.now(), src.profile);
         if (src.source === "mt5" && !note.includes("mt5")) note += "src mt5; ";
         checked[tf] = d.checked && { t: d.checked.t, close: d.checked.close, volRatio: 0 };
-        if (d.signal) signals.push(d.signal);
+        if (d.signal) {
+          signals.push(d.signal);
+          // 大底候補・天井候補は、その後の足で「反転」か「ブレイク」かを判定するため記録(進行中の足は確定してから)
+          const b = d.signal.bar;
+          if (!d.signal.inProgress && !pending.some((p) => p.tf === tf && p.side === d.signal!.side && p.t === b.t))
+            pending.push({ tf, side: d.signal.side, t: b.t, open: b.open, high: b.high, low: b.low, close: b.close, level: d.signal.level, label: lab });
+        }
+        // 判定待ちの決着
+        const keep: Pending[] = [];
+        for (const p of pending) {
+          if (p.tf !== tf) { keep.push(p); continue; }
+          const f = followUp(p, src.bars, Date.now(), src.profile);
+          if (f.signal) follows.push(f.signal);
+          else if (!f.expired) keep.push(p);
+        }
+        pending = keep;
+        // 損益分岐ブレイク
+        const lb = detectLevelBreak(tf, lab, src.bars, lvx, Date.now(), src.profile);
+        if (lb) follows.push(lb);
       } catch (e) { note += `${tf}: ${String(e).slice(0, 80)}; `; checked[tf] = null; }
     }
   }
+  state.pending = pending.slice(-30);
   // 同じ時間足・向きは時間足ごとの間隔をあけ、同じ足は二度送らない
   const now = Date.now();
   const fresh = signals.filter((s) => opts.force || (now - (state.lastSent[`${s.tf}:${s.side}`] ?? 0) > COOLDOWN_BY_TF[s.tf] * 60 * 1000 && !state.lastSent[`${s.tf}:${s.side}:${s.bar.t}`]));
@@ -261,9 +284,22 @@ ${env.SITE_URL}`);
     const log = (await loadMeta<AlertLogItem[]>(env, "alert_log")) ?? [];
     await saveMeta(env, "alert_log", [...log, ...fresh.map((s) => ({ at: now, tf: s.tf, side: s.side, close: s.bar.close, level: s.level, volRatio: s.volRatio, sent: !!sent }))].slice(-100));
   }
-  state.lastRun = { at: now, ok: !note, note: note || `ok (${signals.length} signal${signals.length === 1 ? "" : "s"})`, checked };
+  // ブレイク・反転確認(同じ時間足・種類は時間足ごとの間隔をあけ、同じ足は一度だけ)
+  const freshF = follows.filter((s) => opts.force || (now - (state.lastSent[`${s.tf}:${s.kind}`] ?? 0) > COOLDOWN_BY_TF[s.tf] * 60 * 1000 && !state.lastSent[`${s.tf}:${s.kind}:${s.bar.t}`]));
+  if (freshF.length && send && lv) {
+    let ok = false;
+    if (env.RESEND_API_KEY && env.ALERT_TO) {
+      const m = composeFollowMail(freshF, lv, env.SITE_URL);
+      ok = (await sendMail(env.RESEND_API_KEY, env.ALERT_TO, m.subject, m.text)).ok;
+    }
+    const tid = await tryTweet(env, composeFollowTweet(freshF));
+    if (ok || tid) for (const s of freshF) { state.lastSent[`${s.tf}:${s.kind}`] = now; state.lastSent[`${s.tf}:${s.kind}:${s.bar.t}`] = now; }
+    const log = (await loadMeta<AlertLogItem[]>(env, "alert_log")) ?? [];
+    await saveMeta(env, "alert_log", [...log, ...freshF.map((s) => ({ at: now, tf: s.tf, side: s.kind, close: s.bar.close, level: s.level, volRatio: s.volRatio, sent: ok, text: `${FOLLOW_LABEL[s.kind]} 終${s.bar.close.toLocaleString("ja-JP", { maximumFractionDigits: 0 })}` }))].slice(-100));
+  }
+  state.lastRun = { at: now, ok: !note, note: note || `ok (${signals.length} climax, ${follows.length} follow/break, ${pending.length} pending)`, checked };
   await saveMeta(env, "alert_state", state);
-  return { signals: fresh, sent, note: state.lastRun.note, mail };
+  return { signals: fresh, follows: freshF, sent, note: state.lastRun.note, mail };
 }
 
 /** 判定だけ実行(送信しない)。Yahoo からの取得や判定が動いているかの確認用 */

@@ -1,4 +1,4 @@
-import { levelText } from "./alerts";
+import { FOLLOW_LABEL, levelText, type FollowSignal } from "./alerts";
 import type { Analysis } from "./analysis";
 import type { DailyAnalysis } from "./daily";
 import type { Prediction } from "./model";
@@ -151,6 +151,24 @@ export function composeFarTweet(sig: { side: "put" | "call"; pct: number; strike
     "※JPX清算値段・投資助言ではありません",
     "#日経225オプション",
   ];
+  let text = lines.join("\n");
+  if (weightedLength(text) > 280) text = lines.filter((l) => !l.startsWith("#")).join("\n");
+  return text;
+}
+
+/** ブレイク・反転確認の投稿文 */
+export function composeFollowTweet(sig: FollowSignal[]): string {
+  const s0 = sig[0];
+  const jst = (t: number) => { const d = new Date(t * 1000 + 9 * 3600 * 1000); return `${d.getUTCMonth() + 1}/${d.getUTCDate()} ${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`; };
+  const side = (s0.kind.endsWith("down") || s0.kind === "confirm-bottom" ? "bottom" : "top") as "bottom" | "top";
+  const lines = [
+    `【${FOLLOW_LABEL[s0.kind].replace(/\(.*\)/, "")}】${jst(s0.bar.t)} ${sig.map((x) => x.label).join("・")}`,
+    FOLLOW_LABEL[s0.kind].match(/\((.*)\)/)?.[1] ?? "",
+    `日経225 ${yen(s0.bar.close)} 出来高${s0.volRatio.toFixed(1)}倍`,
+    levelText(side, s0.level, s0.bar.close).replace(/(\d)\.(\d)\d%/g, "$1.$2%"),
+    "※機械的検出・投資助言ではありません",
+    "#日経225先物",
+  ].filter(Boolean);
   let text = lines.join("\n");
   if (weightedLength(text) > 280) text = lines.filter((l) => !l.startsWith("#")).join("\n");
   return text;

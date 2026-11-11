@@ -117,3 +117,27 @@ describe("early-morning volume", () => {
     expect(detect("5m", "5分足", gap, lv, (gap[28].t + 6 * 60) * 1000).signal).toBeNull();
   });
 });
+
+describe("reversal or breakout after a climax", () => {
+  it("confirms a bottom when a later close is above the climax mid, or a breakdown on a new low with volume", async () => {
+    const { followUp, detectLevelBreak } = await import("../src/alerts");
+    const bars = mk(30, 61000);
+    const t = bars[25].t;
+    bars[25] = { t, open: 61000, high: 61010, low: 60600, close: 60620, volume: 3000 };
+    const p = { tf: "5m" as const, side: "bottom" as const, t, open: 61000, high: 61010, low: 60600, close: 60620, level: 61706, label: "5分足" };
+    // 反発: 次の足の終値が中値 60,805 を上回る
+    const up = bars.slice(0, 27); up[26] = { t: t + 300, open: 60620, high: 60900, low: 60610, close: 60850, volume: 900 };
+    expect(followUp(p, up, (t + 900) * 1000).signal?.kind).toBe("confirm-bottom");
+    // 続落: 安値 60,600 を出来高を伴って割って引ける
+    const dn = bars.slice(0, 27); dn[26] = { t: t + 300, open: 60620, high: 60630, low: 60400, close: 60450, volume: 2500 };
+    expect(followUp(p, dn, (t + 900) * 1000).signal?.kind).toBe("break-down");
+    // 決着しないまま 4 本過ぎたら打ち切り
+    const flat = bars.slice(0, 30).map((b, i) => (i > 25 ? { ...b, t: t + (i - 25) * 300, open: 60700, high: 60750, low: 60650, close: 60700, volume: 800 } : b));
+    const r = followUp(p, flat, (t + 6 * 300) * 1000);
+    expect(r.signal).toBeNull(); expect(r.expired).toBe(true);
+    // 損益分岐ブレイク: 直前まで上で引けていて、出来高を伴って 0.2% 以上下で引ける
+    const lb = mk(30, 61800); const tl = lb[29].t;
+    lb[29] = { t: tl, open: 61800, high: 61810, low: 61500, close: 61520, volume: 2000 };
+    expect(detectLevelBreak("5m", "5分足", lb, lv, (tl + 400) * 1000)?.kind).toBe("level-break-down");
+  });
+});

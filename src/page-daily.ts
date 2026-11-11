@@ -355,10 +355,11 @@ function alertsSection(log: AlertLogItem[]): string {
   const items = [...log].slice(-15).reverse();
   const jst = (t: number) => new Date(t + 9 * 3600 * 1000).toISOString().replace("T", " ").slice(5, 16);
   const rows = items.map((x) => {
-    const kind = x.side === "bottom" ? "大底候補" : x.side === "top" ? "天井候補" : x.side === "far-up" ? "ファーOTM急騰" : "ファーOTM急落";
+    const kind = x.side === "bottom" ? "大底候補" : x.side === "top" ? "天井候補" : x.side === "far-up" ? "ファーOTM急騰" : x.side === "far-down" ? "ファーOTM急落"
+      : ({ "confirm-bottom": "大底確認(反発)", "confirm-top": "天井確認(反落)", "break-down": "下落ブレイク(続落)", "break-up": "上昇ブレイク(続伸)", "level-break-down": "下落ブレイク(損益分岐割れ)", "level-break-up": "上昇ブレイク(損益分岐抜け)" } as Record<string, string>)[x.side] ?? x.side;
     const tf = x.tf === "daily" ? "日次" : x.tf === "5m" ? "5分足" : x.tf === "15m" ? "15分足" : "60分足";
     const body = x.text ?? `先物 ${yen(x.close)}(損益分岐 ${yen(x.level)}、出来高 ${x.volRatio.toFixed(1)}倍)`;
-    return `<tr><td>${jst(x.at)}</td><td class="${x.side === "bottom" || x.side === "far-down" ? "down" : "up"}">${kind}</td><td>${tf}</td><td>${body}</td><td>${x.sent ? "送信" : "未送信"}</td></tr>`;
+    return `<tr><td>${jst(x.at)}</td><td class="${["bottom", "far-down", "break-down", "level-break-down", "confirm-top"].includes(x.side) ? "down" : "up"}">${kind}</td><td>${tf}</td><td>${body}</td><td>${x.sent ? "送信" : "未送信"}</td></tr>`;
   }).join("");
   return `<h4>最近のアラート</h4>${rows ? `<div class="table-wrap"><table><thead><tr><th>時刻(JST)</th><th>種類</th><th>時間足</th><th>内容</th><th>メール</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<p class="muted small">まだアラートはありません。大底・天井候補(出来高を伴う急落・急騰 × 売り手の損益分岐)と、ファーOTM のプット・コールの急騰・急落(前日比 2倍以上/0.5倍以下)が出るとここに載り、メールで通知します。</p>`}`;
 }

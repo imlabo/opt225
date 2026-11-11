@@ -175,8 +175,8 @@ ${siteUrl}
   return { subject, text };
 }
 
-export interface AlertState { lastSent: Record<string, number>; lastRun?: { at: number; ok: boolean; note: string; checked: Record<string, { t: number; close: number; volRatio: number } | null> } }
-export interface AlertLogItem { at: number; tf: Tf | "daily"; side: Signal["side"] | "far-up" | "far-down"; close: number; level: number; volRatio: number; sent: boolean; text?: string }
+export interface AlertState { lastSent: Record<string, number>; pending?: Pending[]; lastRun?: { at: number; ok: boolean; note: string; checked: Record<string, { t: number; close: number; volRatio: number } | null> } }
+export interface AlertLogItem { at: number; tf: Tf | "daily"; side: Signal["side"] | "far-up" | "far-down" | FollowSignal["kind"]; close: number; level: number; volRatio: number; sent: boolean; text?: string }
 
 /** 期間内のすべての足についてクライマックス判定(チャートのマーカー用)。level に近いものは near=true */
 export function scanClimax(bars: IBar[], lv: Levels | null, tf: Tf = "5m", profile?: VolProfile): { t: number; side: "bottom" | "top"; near: boolean; volRatio: number }[] {
@@ -250,3 +250,113 @@ export function composeFarMail(sig: FarQuote[], tradeDate: string, spot: number,
     `\n\n遠い行使価格のオプションが前日比 ${FAR_UP}倍以上(急騰)または ${FAR_DOWN}倍以下(急落)になりました。\n急騰は急変動への備え(ヘッジ買い)か売り手の踏み上げ、急落は警戒の後退を示唆します。\n\n${siteUrl}\n\n※JPX の日次清算値段に基づく判定(場中の価格ではありません)。投資助言ではありません。`;
   return { subject, text };
 }
+
+// ---- ブレイク判定: クライマックス後の「反転」か「ブレイク(続落・続伸)」か、と損益分岐ブレイク ----
+
+/** クライマックス足のあと、何本の確定足で決着を見るか */
+export const FOLLOW_BARS: Record<Tf, number> = { "5m": 4, "15m": 3, "60m": 2 };
+export const BREAK_VOL = 1.3; // ブレイク足に求める出来高(基準比)
+export const BREAK_MARGIN = 0.002; // 損益分岐ブレイク: 終値が損益分岐を 0.2% 以上越えて引ける
+export const BREAK_LOOKBACK = 6; // 損益分岐ブレイク: 直近 6 本のうちに反対側で引けた足がある(=今まさに越えた)
+
+/** 判定待ちのクライマックス(大底候補・天井候補) */
+export interface Pending { tf: Tf; side: "bottom" | "top"; t: number; open: number; high: number; low: number; close: number; level: number; label: string }
+
+export type FollowKind = "confirm-bottom" | "confirm-top" | "break-down" | "break-up";
+export interface FollowSignal {
+  kind: FollowKind | "level-break-down" | "level-break-up";
+  tf: Tf; label: string;
+  bar: IBar; // 決め手になった足
+  ref?: Pending; // 元のクライマックス
+  level: number;
+  volRatio: number;
+}
+
+const doneBars = (bars: IBar[], tf: Tf, now: number) => bars.filter((b) => b.volume > 0 && b.t * 1000 + tfMinutes(tf) * 60000 <= now);
+
+/**
+ * クライマックス後の決着: 大底候補なら、
+ *  - その後の確定足の終値がクライマックス足の中値((高値+安値)/2)を上回った → 大底確認(反発)
+ *  - クライマックス足の安値を下回って引け、出来高も基準の 1.3 倍以上 → 下落ブレイク(続落)
+ * 天井候補はその逆。FOLLOW_BARS 本のうちに決着しなければ判定を打ち切る
+ */
+export function followUp(p: Pending, bars: IBar[], now = Date.now(), profile?: VolProfile): { signal: FollowSignal | null; expired: boolean } {
+  const done = doneBars(bars, p.tf, now);
+  const i0 = done.findIndex((b) => b.t > p.t);
+  if (i0 < 0) return { signal: null, expired: now - p.t * 1000 > (FOLLOW_BARS[p.tf] + 2) * tfMinutes(p.tf) * 60000 };
+  const after = done.slice(i0, i0 + FOLLOW_BARS[p.tf]);
+  const mid = (p.high + p.low) / 2;
+  for (let k = 0; k < after.length; k++) {
+    const b = after[k];
+    const idx = i0 + k;
+    const prev = done.slice(Math.max(0, idx - LOOKBACK), idx);
+    const base = prev.length ? baseVolume(prev, b, p.tf, profile) : b.volume;
+    const volRatio = base > 0 ? b.volume / base : 0;
+    if (p.side === "bottom") {
+      if (b.close < p.low && volRatio >= BREAK_VOL) return { signal: { kind: "break-down", tf: p.tf, label: p.label, bar: b, ref: p, level: p.level, volRatio }, expired: false };
+      if (b.close > mid) return { signal: { kind: "confirm-bottom", tf: p.tf, label: p.label, bar: b, ref: p, level: p.level, volRatio }, expired: false };
+    } else {
+      if (b.close > p.high && volRatio >= BREAK_VOL) return { signal: { kind: "break-up", tf: p.tf, label: p.label, bar: b, ref: p, level: p.level, volRatio }, expired: false };
+      if (b.close < mid) return { signal: { kind: "confirm-top", tf: p.tf, label: p.label, bar: b, ref: p, level: p.level, volRatio }, expired: false };
+    }
+  }
+  return { signal: null, expired: after.length >= FOLLOW_BARS[p.tf] };
+}
+
+/**
+ * 損益分岐ブレイク(クライマックス型でなくても): 直近の確定足が、出来高を伴って(基準の 1.3 倍以上)
+ * 損益分岐を 0.2% 以上越えて引け、直前 6 本のうちに反対側で引けた足がある(= いま越えた)
+ *  - プット売り手の損益分岐を下抜け → 下落ブレイク(売り手のヘッジ売り・損切りで下げが加速しやすい)
+ *  - コール売り手の損益分岐を上抜け → 上昇ブレイク(踏み上げ)
+ */
+export function detectLevelBreak(tf: Tf, label: string, bars: IBar[], lv: Levels, now = Date.now(), profile?: VolProfile): FollowSignal | null {
+  const done = doneBars(bars, tf, now);
+  if (done.length < LOOKBACK + 2) return null;
+  const idx = done.length - 1;
+  const b = done[idx];
+  if (now - b.t * 1000 > MAX_AGE_MIN[tf] * 60000) return null;
+  const prev = done.slice(idx - LOOKBACK, idx);
+  const volRatio = b.volume / baseVolume(prev, b, tf, profile);
+  if (volRatio < BREAK_VOL) return null;
+  const recent = done.slice(Math.max(0, idx - BREAK_LOOKBACK), idx);
+  if (lv.putLevel != null && b.close < lv.putLevel * (1 - BREAK_MARGIN) && recent.some((r) => r.close > lv.putLevel!))
+    return { kind: "level-break-down", tf, label, bar: b, level: lv.putLevel, volRatio };
+  if (lv.callLevel != null && b.close > lv.callLevel * (1 + BREAK_MARGIN) && recent.some((r) => r.close < lv.callLevel!))
+    return { kind: "level-break-up", tf, label, bar: b, level: lv.callLevel, volRatio };
+  return null;
+}
+
+export const FOLLOW_LABEL: Record<FollowSignal["kind"], string> = {
+  "confirm-bottom": "大底確認(反発)",
+  "confirm-top": "天井確認(反落)",
+  "break-down": "下落ブレイク(大底候補を割って続落)",
+  "break-up": "上昇ブレイク(天井候補を抜けて続伸)",
+  "level-break-down": "下落ブレイク(プット売り手の損益分岐を割り込み)",
+  "level-break-up": "上昇ブレイク(コール売り手の損益分岐を上抜け)",
+};
+const isDown = (k: FollowSignal["kind"]) => k === "break-down" || k === "level-break-down" || k === "confirm-top";
+
+export function composeFollowMail(sigs: FollowSignal[], lv: Levels, siteUrl: string): { subject: string; text: string } {
+  const s0 = sigs[0];
+  const subject = `【opt225】${FOLLOW_LABEL[s0.kind]}: ${sigs.map((s) => s.label).join("・")} @ ${yen(s0.bar.close)}(${jst(s0.bar.t).slice(6, 11)})`;
+  const side = (s: FollowSignal) => (s.kind.endsWith("down") || s.kind === "confirm-bottom" ? "bottom" : "top") as "bottom" | "top";
+  const body = sigs.map((s) => {
+    const lines = [
+      `■ ${FOLLOW_LABEL[s.kind]}(${s.label}) ${jst(s.bar.t)} の足で確定`,
+      `  始${yen(s.bar.open)} 高${yen(s.bar.high)} 安${yen(s.bar.low)} 終${yen(s.bar.close)} / 出来高 基準の ${s.volRatio.toFixed(1)}倍`,
+    ];
+    if (s.ref) lines.push(`  元の${s.ref.side === "bottom" ? "大底候補" : "天井候補"}: ${jst(s.ref.t)} の足(高${yen(s.ref.high)} 安${yen(s.ref.low)}、中値 ${yen((s.ref.high + s.ref.low) / 2)})`);
+    lines.push(`  ${levelText(side(s), s.level, s.bar.close)}`);
+    return lines.join("\n");
+  }).join("\n\n");
+  const why: Record<FollowSignal["kind"], string> = {
+    "confirm-bottom": "大底候補の足のあと、終値がその足の中値を上回りました。売り手の投げが一巡して反発に転じた可能性があります。",
+    "confirm-top": "天井候補の足のあと、終値がその足の中値を下回りました。買い戻しが一巡して反落に転じた可能性があります。",
+    "break-down": "大底候補の足の安値を、出来高を伴って下回って引けました。投げが一巡せず、下げが続く(続落)可能性があります。",
+    "break-up": "天井候補の足の高値を、出来高を伴って上回って引けました。踏み上げが続く(続伸)可能性があります。",
+    "level-break-down": "出来高を伴ってプット売り手全体の損益分岐を割り込みました。売り手のヘッジ売り・損切りで下げが加速しやすい局面です。",
+    "level-break-up": "出来高を伴ってコール売り手全体の損益分岐を上抜けました。売り手の買い戻し(踏み上げ)で上げが加速しやすい局面です。",
+  };
+  return { subject, text: `${body}\n\n${why[s0.kind]}\n損益分岐は ${lv.tradeDate} の建玉から計算した値です。\n\n${siteUrl}\n\n※機械的な検出です。投資助言ではありません。` };
+}
+export const followIsDown = isDown;

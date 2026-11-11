@@ -316,7 +316,10 @@ export function followUp(p: Pending, bars: IBar[], now = Date.now(), profile?: V
     const strongCont = !!j && j.continuation >= 60 + adj.break && j.continuation >= j.reversal + 10;
     if (beyond && ((beyondCount >= 2 && beyondVol) || (volRatio >= BREAK_VOL && strongCont))) return { signal: mk(bottom ? "break-down" : "break-up"), expired: false };
     const back = bottom ? b.close > mid : b.close < mid;
-    if (back && !newExtreme && (!j || j.reversal >= j.continuation + adj.confirm)) return { signal: mk(bottom ? "confirm-bottom" : "confirm-top"), expired: false };
+    // 確認は慎重に: 反転が継続より 10 点以上(+上乗せ)高く、大きな流れが同じ向きならクライマックス足の始値まで戻すこと
+    const engulf = bottom ? b.close > p.open : b.close < p.open;
+    const trendWith = !!j && (bottom ? -j.tech.trend : j.tech.trend) >= 1.5;
+    if (back && !newExtreme && (!j || (j.reversal >= j.continuation + 10 + adj.confirm && (engulf || !trendWith)))) return { signal: mk(bottom ? "confirm-bottom" : "confirm-top"), expired: false };
   }
   return { signal: null, expired: after.length >= FOLLOW_BARS[p.tf] };
 }

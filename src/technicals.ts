@@ -55,9 +55,13 @@ export interface Tech {
   squeezeRelease: "down" | "up" | null; // 直前まで収縮していたバンドから外へ放れた
   obvSlope: number; // OBV の直近 20 本の傾き(出来高で正規化、−1..1)
   atr: number; // ATR14(値幅の平均)
+  trend: number; // 大きな流れ: (EMA20 − 長期EMA) / ATR。+ は上昇トレンド
+  newHigh: boolean; newLow: boolean; // 直近(約1日〜5日)の高値・安値を更新した足か(= ブレイクの初動)
+  priorUp: number; priorDown: number; // 直近の同じ期間に出ていた上昇・下落クライマックスの本数(2回目以降は息切れのサイン)
 }
 
 const UW_BARS: Record<Tf, number> = { "5m": 288, "15m": 192, "60m": 120 }; // 含み損を見る期間(約1日・2日・5日)
+const TREND_EMA: Record<Tf, number> = { "5m": 144, "15m": 96, "60m": 50 }; // 大きな流れを見る長期EMA(約12時間・1日・2日)
 
 export function techAt(bars: IBar[], i: number, tf: Tf, profile?: VolProfile, elapsed = 1): Tech | null {
   if (i < 30) return null;
@@ -109,6 +113,18 @@ export function techAt(bars: IBar[], i: number, tf: Tf, profile?: VolProfile, el
   let obv = 0; const obvs: number[] = [];
   for (let k = Math.max(1, i - 20); k <= i; k++) { obv += Math.sign(bars[k].close - bars[k - 1].close) * bars[k].volume; obvs.push(obv); }
   const vol20 = bars.slice(Math.max(0, i - 20), i + 1).reduce((s, x) => s + x.volume, 0) || 1;
+  // 大きな流れ(長期EMA との差)と、高値・安値の更新、同じ向きのクライマックスの回数
+  const eLong = ema(close.slice(0, i + 1), TREND_EMA[tf])[i];
+  const hiW = w.length ? Math.max(...w.map((x) => x.high)) : b.high, loW = w.length ? Math.min(...w.map((x) => x.low)) : b.low;
+  let priorUp = 0, priorDown = 0;
+  for (let k = Math.max(LOOKBACK, i - UW_BARS[tf]); k < i - 1; k++) {
+    const x = bars[k], pv = bars.slice(k - LOOKBACK, k);
+    const bv = baseVolume(pv, x, tf, profile), ar = mean(pv.map((y) => y.high - y.low));
+    if (!(bv > 0) || !(ar > 0) || x.volume < 2 * bv || x.high - x.low < 1.5 * ar) continue;
+    const pos = (x.close - x.low) / (x.high - x.low || 1);
+    if (x.close > x.open && pos >= 0.66) priorUp++;
+    else if (x.close < x.open && pos <= 0.34) priorDown++;
+  }
   return {
     volRatio: b.volume / (base * elapsed), rangeRatio: range / (avgRange * Math.sqrt(elapsed)),
     underwaterLong: vAbove / vAll, underwaterShort: vBelow / vAll,
@@ -121,6 +137,9 @@ export function techAt(bars: IBar[], i: number, tf: Tf, profile?: VolProfile, el
     bbWidthPct, squeezeRelease,
     obvSlope: Math.max(-1, Math.min(1, (obvs[obvs.length - 1] - obvs[0]) / vol20)),
     atr,
+    trend: Math.max(-6, Math.min(6, (e20 - eLong) / atr)),
+    newHigh: b.high >= hiW, newLow: b.low <= loW,
+    priorUp, priorDown,
   };
 }
 
@@ -138,7 +157,7 @@ export interface Judge {
 // ---- 学習(src/judge-learn.ts で当たりはずれから推定し、ここで使う) ----
 
 /** 判定の特徴量(向き dir にそろえる。+ は「その向きに行き過ぎ・強い」) */
-export const FEATURE_NAMES = ["出来高(log)", "値幅", "含み損の出来高", "EMA乖離", "連続足", "戻しヒゲ", "引けの位置", "RSI", "ダイバージェンス", "ATR拡大", "バンド幅", "スクイーズ放れ", "OBV"] as const;
+export const FEATURE_NAMES = ["出来高(log)", "値幅", "含み損の出来高", "EMA乖離", "連続足", "戻しヒゲ", "引けの位置", "RSI", "ダイバージェンス", "ATR拡大", "バンド幅", "スクイーズ放れ", "OBV", "大きな流れ", "高値安値更新", "クライマックス回数"] as const;
 export function featureVec(t: Tech, dir: "down" | "up"): number[] {
   const dn = dir === "down";
   return [
@@ -155,9 +174,13 @@ export function featureVec(t: Tech, dir: "down" | "up"): number[] {
     t.bbWidthPct / 100 - 0.5,
     t.squeezeRelease === dir ? 1 : 0,
     dn ? -t.obvSlope : t.obvSlope,
+    Math.max(-2, Math.min(2, (dn ? -t.trend : t.trend) / 3)),
+    (dn ? t.newLow : t.newHigh) ? 1 : 0,
+    Math.min(3, dn ? t.priorDown : t.priorUp) / 2,
   ];
 }
 export interface JudgeModel {
+  v?: number;
   n: number; // 学習に使った件数
   wRev: number[]; wCon: number[]; // ロジスティック回帰の重み(先頭が切片)
   adj: { climax: number; confirm: number; break: number }; // 通知の厳しさの上乗せ(当たりが悪いほど大きい)
@@ -199,21 +222,27 @@ export function judgeAt(bars: IBar[], i: number, tf: Tf, dir: "down" | "up", pro
   const capitulation = capParts.reduce((s, [w, v]) => s + w * v, 0);
   for (const [w, v, label] of capParts) if (w * v >= w * 0.6) reasons.push(`投げ: ${label}`);
 
+  const trendWith = clip01((dn ? -t.trend : t.trend) / 3); // 動きと同じ向きの大きな流れ
+  const prior = dn ? t.priorDown : t.priorUp; // それまでの同じ向きのクライマックス回数
+  const fresh = dn ? t.newLow : t.newHigh; // 高値(安値)更新
   const revParts = [
-    [30, clip01((wickBack - 0.2) / 0.4), `${dn ? "下" : "上"}ヒゲ ${Math.round(wickBack * 100)}%`],
-    [25, clip01(extreme), `RSI ${t.rsi.toFixed(0)}`],
+    [25, clip01((wickBack - 0.2) / 0.4), `${dn ? "下" : "上"}ヒゲ ${Math.round(wickBack * 100)}%`],
+    [15, clip01(extreme), `RSI ${t.rsi.toFixed(0)}`],
     [25, div ? 1 : 0, `RSI ダイバージェンス`],
-    [20, clip01((stretch - 2) / 2), `行き過ぎ ${stretch.toFixed(1)}ATR`],
+    [15, clip01((stretch - 2) / 2), `行き過ぎ ${stretch.toFixed(1)}ATR`],
+    [20, clip01(prior / 2), `同じ向きのクライマックス ${prior + 1}回目(息切れ)`],
   ] as const;
   const reversal = revParts.reduce((s, [w, v]) => s + w * v, 0);
   for (const [w, v, label] of revParts) if (w * v >= w * 0.6) reasons.push(`反転: ${label}`);
 
   const conParts = [
-    [25, clip01((closeAtExtreme - 0.7) / 0.3), `${dn ? "安値" : "高値"}引け`],
-    [20, clip01((t.atrRatio - 1) / 0.6), `ATR 拡大 ${t.atrRatio.toFixed(2)}倍`],
-    [20, release ? 1 : 0, `収縮(スクイーズ)からのバンド放れ`],
-    [20, clip01(obvConfirm / 0.6), `OBV が${dn ? "下向き" : "上向き"}`],
-    [15, div || extreme > 0.5 ? 0 : 1, `RSI に過熱・逆行なし`],
+    [20, clip01((closeAtExtreme - 0.7) / 0.3), `${dn ? "安値" : "高値"}引け`],
+    [10, clip01((t.atrRatio - 1) / 0.6), `ATR 拡大 ${t.atrRatio.toFixed(2)}倍`],
+    [10, release ? 1 : 0, `収縮(スクイーズ)からのバンド放れ`],
+    [15, clip01(obvConfirm / 0.6), `OBV が${dn ? "下向き" : "上向き"}`],
+    [10, div || extreme > 0.5 ? 0 : 1, `RSI に過熱・逆行なし`],
+    [20, trendWith, `大きな流れが${dn ? "下向き" : "上向き"}`],
+    [15, fresh && prior === 0 ? 1 : 0, `${dn ? "安値" : "高値"}更新の初動(1回目のクライマックス)`],
   ] as const;
   const continuation = conParts.reduce((s, [w, v]) => s + w * v, 0);
   for (const [w, v, label] of conParts) if (w * v >= w * 0.6) reasons.push(`継続: ${label}`);
@@ -253,6 +282,24 @@ export const VERDICT_LABEL: Record<Judge["verdict"], string> = {
   breakout: "ブレイク(継続)優勢",
   undecided: "判定保留(材料が拮抗)",
 };
+/**
+ * 天井・大底として通知してよいか(慎重判定): 反転 ≥ 継続 + 5 + 上乗せ、かつ「反転の決め手」が 1 つ以上
+ * 決め手 = 戻しのヒゲ 30% 以上 / RSI ダイバージェンス / 2 回目以降のクライマックスで RSI が過熱
+ * 大きな流れと同じ向きの、高値(安値)更新の初動は、決め手があっても継続を優先(通知しない)
+ */
+export function reversalOk(j: Judge, extra = 0): { ok: boolean; why: string } {
+  const t = j.tech, dn = j.dir === "down";
+  const wick = dn ? t.lowerWick : t.upperWick, prior = dn ? t.priorDown : t.priorUp;
+  const div = (dn && t.divergence === "bull") || (!dn && t.divergence === "bear");
+  const hot = dn ? t.rsi <= 30 : t.rsi >= 70;
+  const decisive = wick >= 0.3 || div || (prior >= 1 && hot);
+  const freshTrend = (dn ? t.newLow : t.newHigh) && prior === 0 && (dn ? -t.trend : t.trend) >= 1.5 && !div;
+  if (freshTrend) return { ok: false, why: "流れと同じ向きの高値(安値)更新の初動(ブレイク優勢)" };
+  if (j.reversal < j.continuation + 5 + extra) return { ok: false, why: `反転 ${j.reversal} < 継続 ${j.continuation} + ${5 + extra}` };
+  if (!decisive) return { ok: false, why: "反転の決め手(ヒゲ・ダイバージェンス・2回目以降の過熱)なし" };
+  return { ok: true, why: "" };
+}
+
 /** 投げ度による強さ: 高(60以上)・中(40以上)・低 */
 export const tierOf = (cap: number): "高" | "中" | "低" => (cap >= 60 ? "高" : cap >= 40 ? "中" : "低");
 export function judgeText(j: Judge): string {

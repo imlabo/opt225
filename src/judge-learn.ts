@@ -4,15 +4,16 @@
  *  2) 通知した種類ごとの当たり率から、通知の厳しさを自動で上げ下げする(当たりが悪い種類ほど条件を厳しく)
  *
  * 答え合わせ: 判定した足の終値から、HORIZON 本のうちに
- *   その向きに MOVE_ATR × ATR 進んだのが先 → 継続(con)、逆向きに MOVE_ATR × ATR 戻したのが先 → 反転(rev)、どちらもなし → none
+ *   その向きに MOVE_ATR(1.5) × ATR 進んだのが先 → 継続(con)、逆向きに MOVE_ATR × ATR 戻したのが先 → 反転(rev)、どちらもなし → none
  * 学習データ: 分足のクライマックス足(損益分岐から遠いものも含む)すべてと、実際に通知した足
  */
 import { type IBar, type Tf, type VolProfile, scanClimax } from "./alerts";
 import { featureVec, techAt, LEARN_MIN_N, type Judge, type JudgeModel } from "./technicals";
 import { fitLogistic } from "./model";
 
-export const HORIZON: Record<Tf, number> = { "5m": 12, "15m": 8, "60m": 6 }; // 1時間・2時間・6時間
-export const MOVE_ATR = 1.0;
+export const HORIZON: Record<Tf, number> = { "5m": 24, "15m": 16, "60m": 10 }; // 2時間・4時間・10時間
+export const MOVE_ATR = 1.5; // 小さな戻しで「当たり」にしないよう ATR 1.5 本分
+export const JUDGE_VERSION = 2; // 特徴量・答え合わせの定義を変えたら上げる(古いデータは捨てて取り直す)
 export const LEARN_EVERY_MS = 15 * 60 * 1000;
 export const MAX_SAMPLES = 1500;
 export const MAX_WATCH = 300;
@@ -20,7 +21,7 @@ export const REFIT_MS = 60 * 60 * 1000; // 学習し直しは 1 時間に 1 回�
 export const FIT_ROWS = 500; // 学習に使う直近の件数(CPU 制限のため)
 
 /** 種類: climax = 学習用の全クライマックス足、alert-bottom/top = 通知した天井・大底候補、ほかは FollowSignal の種類 */
-export interface Watch { tf: Tf; t: number; dir: "down" | "up"; kind: string; x: number[]; cap: number; rev: number; con: number; close: number; atr: number; sent?: boolean }
+export interface Watch { v?: number; tf: Tf; t: number; dir: "down" | "up"; kind: string; x: number[]; cap: number; rev: number; con: number; close: number; atr: number; sent?: boolean }
 export interface Sample extends Watch { y: "rev" | "con" | "none"; at: number }
 
 /** 当たりの定義: 反転を見込む種類は rev、続伸・続落を見込む種類は con が当たり */
@@ -32,7 +33,7 @@ export const dirOfKind = (kind: string): "down" | "up" =>
 
 export function watchFrom(tf: Tf, t: number, kind: string, j: Judge | null | undefined, close: number, sent: boolean): Watch | null {
   if (!j) return null;
-  return { tf, t, dir: j.dir, kind, x: featureVec(j.tech, j.dir), cap: j.capitulation, rev: j.reversal, con: j.continuation, close, atr: j.tech.atr, sent };
+  return { v: JUDGE_VERSION, tf, t, dir: j.dir, kind, x: featureVec(j.tech, j.dir), cap: j.capitulation, rev: j.reversal, con: j.continuation, close, atr: j.tech.atr, sent };
 }
 
 /** 答え合わせ。まだ HORIZON 本たっていなければ null */
@@ -63,7 +64,7 @@ export function collectAndResolve(tf: Tf, bars: IBar[], profile: VolProfile | un
     const i = idx.get(c.t)!;
     const tech = techAt(done, i, tf, profile);
     if (!tech) continue;
-    watch.push({ tf, t: c.t, dir, kind: "climax", x: featureVec(tech, dir), cap: 0, rev: 0, con: 0, close: done[i].close, atr: tech.atr });
+    watch.push({ v: JUDGE_VERSION, tf, t: c.t, dir, kind: "climax", x: featureVec(tech, dir), cap: 0, rev: 0, con: 0, close: done[i].close, atr: tech.atr });
     known.add(k); added++;
   }
   const keep: Watch[] = [], resolved: Sample[] = [];
@@ -105,5 +106,8 @@ export function fitJudgeModel(samples: Sample[], now = Date.now()): JudgeModel {
   const cl = data.filter((s) => s.kind === "climax");
   stats.climaxAll = { n: cl.length, hit: cl.filter((s) => s.y === "rev").length };
   const cnt = (y: Sample["y"]) => data.filter((s) => s.y === y).length / (data.length || 1);
-  return { n: data.length, wRev, wCon, adj, stats, base: { rev: cnt("rev"), con: cnt("con"), none: cnt("none") }, updatedAt: now };
+  return { v: JUDGE_VERSION, n: data.length, wRev, wCon, adj, stats, base: { rev: cnt("rev"), con: cnt("con"), none: cnt("none") }, updatedAt: now };
 }
+
+/** 今の定義のデータだけ残す */
+export const current = <T extends { v?: number }>(xs: T[]) => xs.filter((x) => x.v === JUDGE_VERSION);

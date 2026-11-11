@@ -1,4 +1,5 @@
 import { FOLLOW_LABEL, levelText, type FollowSignal } from "./alerts";
+import { VERDICT_LABEL, type Judge } from "./technicals";
 import type { Analysis } from "./analysis";
 import type { DailyAnalysis } from "./daily";
 import type { Prediction } from "./model";
@@ -128,16 +129,17 @@ export function composeDailyTweet(a: DailyAnalysis, _siteUrl: string, p?: Predic
 }
 
 /** 天井・大底候補アラートの投稿文 */
-export function composeAlertTweet(sig: { tf: string; label: string; side: "bottom" | "top"; bar: { t: number; close: number; volume: number }; volRatio: number; level: number; crossed: boolean; distPct: number; inProgress: boolean }[], _siteUrl: string): string {
+export function composeAlertTweet(sig: { tf: string; label: string; side: "bottom" | "top"; bar: { t: number; close: number; volume: number }; volRatio: number; level: number; crossed: boolean; distPct: number; inProgress: boolean; judge?: Judge | null; tier?: string }[], _siteUrl: string): string {
   const s0 = sig[0];
   const jst = (t: number) => { const d = new Date(t * 1000 + 9 * 3600 * 1000); return `${d.getUTCMonth() + 1}/${d.getUTCDate()} ${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`; };
   const lines = [
     `【${s0.side === "bottom" ? "大底候補" : "天井候補"}${s0.inProgress ? "(速報)" : ""}】${jst(s0.bar.t)} ${sig.map((x) => x.label).join("・")}`,
     `日経225先物 ${yen(s0.bar.close)} 出来高${s0.volRatio.toFixed(1)}倍の${s0.side === "bottom" ? "下落" : "上昇"}`,
     levelText(s0.side, s0.level, s0.bar.close).replace(/(\d)\.(\d)\d%/g, "$1.$2%"),
+    s0.judge ? judgeLine(s0.judge) : "",
     "※機械的検出・投資助言ではありません",
     "#日経225先物",
-  ];
+  ].filter(Boolean);
   let text = lines.join("\n");
   if (weightedLength(text) > 280) text = lines.filter((l) => !l.startsWith("#")).join("\n");
   return text;
@@ -166,10 +168,16 @@ export function composeFollowTweet(sig: FollowSignal[]): string {
     FOLLOW_LABEL[s0.kind].match(/\((.*)\)/)?.[1] ?? "",
     `日経225 ${yen(s0.bar.close)} 出来高${s0.volRatio.toFixed(1)}倍`,
     levelText(side, s0.level, s0.bar.close).replace(/(\d)\.(\d)\d%/g, "$1.$2%"),
+    s0.judge ? judgeLine(s0.judge) : "",
     "※機械的検出・投資助言ではありません",
     "#日経225先物",
   ].filter(Boolean);
   let text = lines.join("\n");
   if (weightedLength(text) > 280) text = lines.filter((l) => !l.startsWith("#")).join("\n");
   return text;
+}
+
+/** テクニカル判定の 1 行(投稿用) */
+function judgeLine(j: Judge): string {
+  return `判定: ${VERDICT_LABEL[j.verdict]}(投げ度${j.capitulation}・反転${j.reversal}・継続${j.continuation})`;
 }

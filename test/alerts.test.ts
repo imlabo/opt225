@@ -128,9 +128,16 @@ describe("reversal or breakout after a climax", () => {
     // 反発: 次の足の終値が中値 60,805 を上回る
     const up = bars.slice(0, 27); up[26] = { t: t + 300, open: 60620, high: 60900, low: 60610, close: 60850, volume: 900 };
     expect(followUp(p, up, (t + 900) * 1000).signal?.kind).toBe("confirm-bottom");
-    // 続落: 安値 60,600 を出来高を伴って割って引ける
-    const dn = bars.slice(0, 27); dn[26] = { t: t + 300, open: 60620, high: 60630, low: 60400, close: 60450, volume: 2500 };
-    expect(followUp(p, dn, (t + 900) * 1000).signal?.kind).toBe("break-down");
+    // 1 本だけ安値を割って引けても、まだブレイクとはしない(慎重判定)
+    const dn = bars.slice(0, 28); dn[26] = { t: t + 300, open: 60620, high: 60630, low: 60400, close: 60450, volume: 2500 };
+    expect(followUp(p, dn.slice(0, 27), (t + 900) * 1000).signal).toBeNull();
+    // 続落: 安値 60,600 を下回る引けが 2 本続く(出来高を伴う足を含む)
+    dn[27] = { t: t + 600, open: 60450, high: 60470, low: 60300, close: 60320, volume: 1500 };
+    expect(followUp(p, dn, (t + 1200) * 1000).signal?.kind).toBe("break-down");
+    // いったん安値を更新してから中値を上回っても「大底確認」にはしない
+    const wob = bars.slice(0, 28); wob[26] = { t: t + 300, open: 60620, high: 60640, low: 60450, close: 60620, volume: 900 };
+    wob[27] = { t: t + 600, open: 60620, high: 60900, low: 60600, close: 60850, volume: 900 };
+    expect(followUp(p, wob, (t + 1200) * 1000).signal?.kind).not.toBe("confirm-bottom");
     // 決着しないまま 4 本過ぎたら打ち切り
     const flat = bars.slice(0, 30).map((b, i) => (i > 25 ? { ...b, t: t + (i - 25) * 300, open: 60700, high: 60750, low: 60650, close: 60700, volume: 800 } : b));
     const r = followUp(p, flat, (t + 6 * 300) * 1000);
@@ -138,6 +145,36 @@ describe("reversal or breakout after a climax", () => {
     // 損益分岐ブレイク: 直前まで上で引けていて、出来高を伴って 0.2% 以上下で引ける
     const lb = mk(30, 61800); const tl = lb[29].t;
     lb[29] = { t: tl, open: 61800, high: 61810, low: 61500, close: 61520, volume: 2000 };
-    expect(detectLevelBreak("5m", "5分足", lb, lv, (tl + 400) * 1000)?.kind).toBe("level-break-down");
+    // 1 本だけでは出さない
+    expect(detectLevelBreak("5m", "5分足", lb, lv, (tl + 400) * 1000)).toBeNull();
+    // 2 本続けて損益分岐の下で引け、安値引け・ATR 拡大で継続側が優勢 → 下落ブレイク
+    lb.push({ t: tl + 300, open: 61520, high: 61530, low: 61300, close: 61305, volume: 1800 });
+    const r2 = detectLevelBreak("5m", "5分足", lb, lv, (tl + 700) * 1000);
+    expect(r2?.kind).toBe("level-break-down");
+    expect(r2?.judge?.continuation).toBeGreaterThanOrEqual(55);
+  });
+});
+
+describe("technical judgement", () => {
+  it("scores capitulation when trapped longs dump on a volume spike far below the EMA", async () => {
+    const { judgeAt, energyAt } = await import("../src/technicals");
+    // 高値圏でもみ合い(出来高多め)→ じり安 → 出来高を伴う長い下ヒゲの急落(投げ)
+    const bars = [] as { t: number; open: number; high: number; low: number; close: number; volume: number }[];
+    let px = 62000, t = 1_700_000_000;
+    for (let i = 0; i < 60; i++) { bars.push({ t, open: px, high: px + 30, low: px - 30, close: px + (i % 2 ? 10 : -10), volume: 1000 }); t += 300; }
+    for (let i = 0; i < 10; i++) { const o = px; px -= 60; bars.push({ t, open: o, high: o + 10, low: px - 10, close: px, volume: 1100 }); t += 300; }
+    const o = px; bars.push({ t, open: o, high: o + 10, low: o - 700, close: o - 250, volume: 6000 });
+    const j = judgeAt(bars, bars.length - 1, "5m", "down")!;
+    expect(j.capitulation).toBeGreaterThanOrEqual(60);
+    expect(j.tech.underwaterLong).toBeGreaterThan(0.8);
+    expect(j.reversal).toBeGreaterThan(j.continuation - 20);
+    expect(energyAt(bars, bars.length - 1, "5m")!.trappedLong).toBeGreaterThan(80);
+  });
+  it("sees stored energy when the bands are compressed", async () => {
+    const { energyAt } = await import("../src/technicals");
+    const bars = [] as { t: number; open: number; high: number; low: number; close: number; volume: number }[];
+    let t = 1_700_000_000;
+    for (let i = 0; i < 80; i++) { const w = i < 50 ? 150 : 10; const c = 62000 + (i % 2 ? w : -w); bars.push({ t, open: 62000, high: c + 5, low: c - 5, close: c, volume: 1000 }); t += 300; }
+    expect(energyAt(bars, bars.length - 1, "5m")!.compression).toBeGreaterThanOrEqual(70);
   });
 });

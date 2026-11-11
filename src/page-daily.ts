@@ -270,12 +270,23 @@ function intradaySection(a: DailyAnalysis): string {
   return `<h4>日経225 分足チャート <small class="muted">XS の MT5 から届いていればリアルタイム、なければ CME NKD=F(Yahoo Finance、10〜20分遅れることあり)。損益分岐はその価格水準に換算</small></h4>
     <div class="tf-tabs" id="tf-tabs"><button data-tf="5m" class="on">5分足</button><button data-tf="15m">15分足</button><button data-tf="60m">60分足</button><span class="muted small" id="tf-status">読み込み中…</span></div>
     <div id="tf-chart" class="tf-chart"></div>
+    <div id="tf-judge" class="tf-judge"></div>
+    <details class="muted small"><summary>テクニカル判定の見方</summary>
+    <p>最新の確定足について、下げ(上げ)の動きが「投げ → 反転」なのか「ブレイク → 継続」なのかを点数(0〜100)で比べています。</p>
+    <ul>
+    <li><b>投げ度</b>: 含み損を抱えた人が一気に手放している度合い。出来高の急増、<b>含み損の出来高</b>(直近 約1日〜5日の出来高のうち、いまより上で買われた割合 = 買い方の含み損)、20EMA からの乖離(ATR 何本分か)、値幅の拡大、陰線(陽線)の連続から計算。60 以上が「高」。投げ度「低」(40 未満)の天井・大底候補はメール・X に送りません</li>
+    <li><b>反転</b>: 戻しのヒゲ(下ヒゲ・上ヒゲ)、RSI の売られ過ぎ・買われ過ぎ、RSI ダイバージェンス(価格は安値更新なのに RSI は切り上げ)、行き過ぎ</li>
+    <li><b>継続</b>: 安値(高値)引け、ATR の拡大、値幅の収縮(スクイーズ)からのバンド放れ、OBV(出来高の方向)、RSI に過熱・逆行がないこと</li>
+    <li><b>エネルギー</b>: ボリンジャーバンド幅が直近で狭いほど「収縮」が高く、たまったエネルギーの向きを OBV と含み損の滞留で売り圧・買い圧に分けています。収縮が高いまま売り圧が強いと、放れたときに下へ走りやすい目安です</li>
+    </ul>
+    <p>ブレイク通知は慎重にしています: 天井・大底候補の足を越える引けが 2 本続く(または 1 本でも出来高を伴い継続が 60 以上で反転より 10 以上高い)ときだけ。大底(天井)確認も、途中で安値(高値)を更新せず、反転 ≥ 継続のときだけ。損益分岐ブレイクは 2 本続けて外で引け、継続 55 以上のとき。</p>
+    </details>
     <p class="muted small">黄色の破線 = プット売り手の損益分岐 ${lv(be?.putBreakeven)}、コール売り手の損益分岐 ${lv(be?.callBreakeven)}(${a.tradeDate} の建玉から)。▲▼ = 出来高が直近20本平均の2倍以上かつ値幅1.5倍以上のクライマックス足(安値引け=▼、高値引け=▲)。損益分岐の近く(0.8%以内)で出たものは大きく表示し、その時点でメール通知しています。1分ごとに自動更新。</p>
     <script>${INTRADAY_JS}</script>`;
 }
 
 const INTRADAY_JS = `(function(){
-var cur="5m",timer=null;var el=document.getElementById("tf-chart"),st=document.getElementById("tf-status"),tabs=document.getElementById("tf-tabs");
+var cur="5m",timer=null;var el=document.getElementById("tf-chart"),st=document.getElementById("tf-status"),tabs=document.getElementById("tf-tabs"),jd=document.getElementById("tf-judge");
 if(!el)return;
 function yen(n){return Math.round(n).toLocaleString("ja-JP")}
 function jst(t){var d=new Date(t*1000+9*3600e3);return (d.getUTCMonth()+1)+"/"+d.getUTCDate()+" "+String(d.getUTCHours()).padStart(2,"0")+":"+String(d.getUTCMinutes()).padStart(2,"0")}
@@ -307,9 +318,15 @@ function draw(d){
   s+='</svg>';el.innerHTML=s;
   st.textContent=(d.source==="mt5"?"XS MT5 "+d.symbol+"(リアルタイム) ":"CME "+d.symbol+"(Yahoo・遅延あり) ")+d.label+" 最新 "+jst(last.t)+" "+yen(last.close)+lvTxt("put",lv.putLevel,last.close)+lvTxt("call",lv.callLevel,last.close);
 }
+var VL={capitulation:"投げ→反転含み",reversal:"反転の兆し",breakout:"ブレイク優勢",undecided:"判定保留"};
+function bar3(v){return '<span class="jbar"><span style="width:'+Math.max(0,Math.min(100,v))+'%"></span></span>'+v}
+function jrow(name,j){if(!j)return"";return '<tr><th>'+name+'</th><td><b>'+j.label+'</b></td><td>投げ度 '+bar3(j.capitulation)+'</td><td>反転 '+bar3(j.reversal)+'</td><td>継続 '+bar3(j.continuation)+'</td></tr>'+(j.reasons.length?'<tr><td></td><td colspan="4" class="muted small">'+j.reasons.slice(0,6).join("、")+'</td></tr>':"")}
+function drawJudge(d){if(!jd)return;var g=d.judge;if(!g){jd.innerHTML="";return}var e=g.energy,dn=g.down||{};
+  jd.innerHTML='<div class="table-wrap"><table class="small"><caption class="muted">テクニカル判定('+jst(g.t)+' の足・RSI '+(dn.rsi!=null?dn.rsi:"—")+(dn.divergence?(dn.divergence==="bull"?"・強気ダイバージェンス":"・弱気ダイバージェンス"):"")+'・20EMA乖離 '+(dn.stretch!=null?dn.stretch+"ATR":"—")+')</caption>'+jrow("下げ",g.down)+jrow("上げ",g.up)+'</table></div>'+
+  (e?'<p class="small">エネルギー: 収縮 '+bar3(e.compression)+'　売り圧 '+bar3(e.sell)+'　買い圧 '+bar3(e.buy)+'<br>含み損の出来高: 買い方 '+e.trappedLong+'%・売り方 '+e.trappedShort+'%　<span class="muted">'+e.note+'</span></p>':"")}
 function lvTxt(side,level,close){if(level==null)return"";var put=side==="put";var d=(put?close-level:level-close)/close*100;var who=put?"プット":"コール";
   return d<0?"　"+who+"損益分岐 "+yen(level)+" を"+(put?"割れ":"上抜け")+"("+d.toFixed(2)+"%・売り手は損失圏)":"　"+who+"損益分岐 "+yen(level)+" まであと "+d.toFixed(2)+"%"}
-function load(){st.textContent="読み込み中…";fetch("/api/intraday?tf="+cur).then(function(r){return r.json()}).then(function(d){if(d.error){st.textContent="取得失敗: "+d.error;return}draw(d)}).catch(function(e){st.textContent="取得失敗: "+e})}
+function load(){st.textContent="読み込み中…";fetch("/api/intraday?tf="+cur).then(function(r){return r.json()}).then(function(d){if(d.error){st.textContent="取得失敗: "+d.error;return}draw(d);drawJudge(d)}).catch(function(e){st.textContent="取得失敗: "+e})}
 tabs.addEventListener("click",function(e){var b=e.target.closest("button");if(!b)return;cur=b.getAttribute("data-tf");Array.prototype.forEach.call(tabs.querySelectorAll("button"),function(x){x.classList.toggle("on",x===b)});load()});
 load();timer=setInterval(load,60*1000);
 })();`;
@@ -409,7 +426,7 @@ details.explain summary{cursor:pointer;font-weight:700}details.explain dt{font-w
 details.explain dd p{margin:2px 0}details.explain .today{color:var(--fg);background:#8881;border-radius:6px;padding:2px 6px}
 .vi-line{fill:none;stroke:#d946ef;stroke-width:2}.vi-nk{fill:none;stroke:var(--muted);stroke-width:1;stroke-dasharray:3 3}.vi-dot{fill:#d946ef}svg text.vi-t,svg tspan.vi-t{fill:#d946ef}svg tspan.vi-nk-t{fill:var(--muted)}
 .tf-tabs{display:flex;gap:6px;align-items:center;margin:8px 0}.tf-tabs button{border:1px solid #8886;background:transparent;color:var(--fg);padding:4px 10px;border-radius:6px;cursor:pointer;font-size:13px}.tf-tabs button.on{background:#0ea5e9;border-color:#0ea5e9;color:#fff}
-.tf-chart svg{width:100%;height:auto}.tf-vu{fill:var(--up);opacity:.35}.tf-vd{fill:var(--down);opacity:.35}.tf-lv{stroke:#eab308;stroke-dasharray:6 3;stroke-width:1.2}svg text.tf-lv-t{fill:#eab308;font-size:10px}svg text.tf-last{fill:var(--fg);font-size:11px;font-weight:700}
+.tf-chart svg{width:100%;height:auto}.tf-vu{fill:var(--up);opacity:.35}.tf-vd{fill:var(--down);opacity:.35}.tf-lv{stroke:#eab308;stroke-dasharray:6 3;stroke-width:1.2}svg text.tf-lv-t{fill:#eab308;font-size:10px}svg text.tf-last{fill:var(--fg);font-size:11px;font-weight:700}.jbar{display:inline-block;width:60px;height:6px;background:var(--grid,#8883);border-radius:3px;margin:0 4px;vertical-align:middle;overflow:hidden}.jbar span{display:block;height:100%;background:#eab308}.tf-judge table th{text-align:left;white-space:nowrap}
 svg text.tf-mk{font-size:9px}svg text.tf-mk-near{font-size:15px;font-weight:700}svg text.tf-mk-b{fill:#22c55e}svg text.tf-mk-t{fill:#ef4444}
 .ic-up{stroke:var(--up)}.ic-dn{stroke:var(--down)}.ic-up-b{fill:var(--up)}.ic-dn-b{fill:var(--down)}
 .sq-hot{color:#dc2626!important;font-weight:700}.sq-calm{color:#16a34a!important}
@@ -418,7 +435,7 @@ details.explain summary{cursor:pointer;font-weight:700}details.explain dt{font-w
 details.explain dd p{margin:2px 0}details.explain .today{color:var(--fg);background:#8881;border-radius:6px;padding:2px 6px}
 .vi-line{fill:none;stroke:#d946ef;stroke-width:2}.vi-nk{fill:none;stroke:var(--muted);stroke-width:1;stroke-dasharray:3 3}.vi-dot{fill:#d946ef}svg text.vi-t,svg tspan.vi-t{fill:#d946ef}svg tspan.vi-nk-t{fill:var(--muted)}
 .tf-tabs{display:flex;gap:6px;align-items:center;margin:8px 0}.tf-tabs button{border:1px solid #8886;background:transparent;color:var(--fg);padding:4px 10px;border-radius:6px;cursor:pointer;font-size:13px}.tf-tabs button.on{background:#0ea5e9;border-color:#0ea5e9;color:#fff}
-.tf-chart svg{width:100%;height:auto}.tf-vu{fill:var(--up);opacity:.35}.tf-vd{fill:var(--down);opacity:.35}.tf-lv{stroke:#eab308;stroke-dasharray:6 3;stroke-width:1.2}svg text.tf-lv-t{fill:#eab308;font-size:10px}svg text.tf-last{fill:var(--fg);font-size:11px;font-weight:700}
+.tf-chart svg{width:100%;height:auto}.tf-vu{fill:var(--up);opacity:.35}.tf-vd{fill:var(--down);opacity:.35}.tf-lv{stroke:#eab308;stroke-dasharray:6 3;stroke-width:1.2}svg text.tf-lv-t{fill:#eab308;font-size:10px}svg text.tf-last{fill:var(--fg);font-size:11px;font-weight:700}.jbar{display:inline-block;width:60px;height:6px;background:var(--grid,#8883);border-radius:3px;margin:0 4px;vertical-align:middle;overflow:hidden}.jbar span{display:block;height:100%;background:#eab308}.tf-judge table th{text-align:left;white-space:nowrap}
 svg text.tf-mk{font-size:9px}svg text.tf-mk-near{font-size:15px;font-weight:700}svg text.tf-mk-b{fill:#22c55e}svg text.tf-mk-t{fill:#ef4444}
 .ic-up{stroke:var(--up)}.ic-dn{stroke:var(--down)}.ic-up-b{fill:var(--up)}.ic-dn-b{fill:var(--down)}
 .sq-hot{color:#dc2626!important;font-weight:700}.sq-calm{color:#16a34a!important}

@@ -1,3 +1,4 @@
+import { judgeAt, energyAt, VERDICT_LABEL } from "./technicals";
 import { Hono } from "hono";
 import { analyze } from "./analysis";
 import { loadAnalyses, saveAnalysis, loadDailyAnalyses, loadDailyStrikes, loadEvaluated, loadHistory, loadLatestPrediction, loadMeta, loadModelLogs, loadSentiment, saveMeta, saveSentiment, updateDailyIchimoku, type SentimentPayload } from "./db";
@@ -268,7 +269,15 @@ ${env.SITE_URL}`);
   state.pending = pending.slice(-30);
   // 同じ時間足・向きは時間足ごとの間隔をあけ、同じ足は二度送らない
   const now = Date.now();
-  const fresh = signals.filter((s) => opts.force || (now - (state.lastSent[`${s.tf}:${s.side}`] ?? 0) > COOLDOWN_BY_TF[s.tf] * 60 * 1000 && !state.lastSent[`${s.tf}:${s.side}:${s.bar.t}`]));
+  // 投げ度「低」(含み損の投げ・行き過ぎの材料が乏しい)は送らず、記録だけ残す
+  const weak = signals.filter((s) => s.tier === "低" && !opts.force);
+  const fresh = signals.filter((s) => (opts.force || s.tier !== "低") && (opts.force || (now - (state.lastSent[`${s.tf}:${s.side}`] ?? 0) > COOLDOWN_BY_TF[s.tf] * 60 * 1000 && !state.lastSent[`${s.tf}:${s.side}:${s.bar.t}`])));
+  const weakNew = weak.filter((s) => !s.inProgress && !state.lastSent[`${s.tf}:${s.side}:${s.bar.t}:weak`]);
+  if (weakNew.length && send) {
+    for (const s of weakNew) state.lastSent[`${s.tf}:${s.side}:${s.bar.t}:weak`] = now;
+    const log = (await loadMeta<AlertLogItem[]>(env, "alert_log")) ?? [];
+    await saveMeta(env, "alert_log", [...log, ...weakNew.map((s) => ({ at: now, tf: s.tf, side: s.side, close: s.bar.close, level: s.level, volRatio: s.volRatio, sent: false, text: `投げ度低(${s.judge?.capitulation ?? "-"})のため通知せず` }))].slice(-100));
+  }
   let sent: boolean | undefined, mail: unknown;
   if (fresh.length && send && lv) {
     if (!env.RESEND_API_KEY || !env.ALERT_TO) { note += "RESEND_API_KEY/ALERT_TO not set; "; sent = false; }
@@ -280,9 +289,9 @@ ${env.SITE_URL}`);
     const tweetId = await tryTweet(env, composeAlertTweet(fresh, env.SITE_URL));
     if (sent || tweetId) for (const s of fresh) { state.lastSent[`${s.tf}:${s.side}`] = now; state.lastSent[`${s.tf}:${s.side}:${s.bar.t}`] = now; }
     // 古い足のキーは掃除
-    for (const k of Object.keys(state.lastSent)) if (k.split(":").length === 3 && now - state.lastSent[k] > 864e5) delete state.lastSent[k];
+    for (const k of Object.keys(state.lastSent)) if (k.split(":").length >= 3 && now - state.lastSent[k] > 864e5) delete state.lastSent[k];
     const log = (await loadMeta<AlertLogItem[]>(env, "alert_log")) ?? [];
-    await saveMeta(env, "alert_log", [...log, ...fresh.map((s) => ({ at: now, tf: s.tf, side: s.side, close: s.bar.close, level: s.level, volRatio: s.volRatio, sent: !!sent }))].slice(-100));
+    await saveMeta(env, "alert_log", [...log, ...fresh.map((s) => ({ at: now, tf: s.tf, side: s.side, close: s.bar.close, level: s.level, volRatio: s.volRatio, sent: !!sent, text: s.judge ? `投げ度${s.judge.capitulation}(${s.tier}) 反転${s.judge.reversal} 継続${s.judge.continuation}` : undefined }))].slice(-100));
   }
   // ブレイク・反転確認(同じ時間足・種類は時間足ごとの間隔をあけ、同じ足は一度だけ)
   const freshF = follows.filter((s) => opts.force || (now - (state.lastSent[`${s.tf}:${s.kind}`] ?? 0) > COOLDOWN_BY_TF[s.tf] * 60 * 1000 && !state.lastSent[`${s.tf}:${s.kind}:${s.bar.t}`]));
@@ -295,7 +304,7 @@ ${env.SITE_URL}`);
     const tid = await tryTweet(env, composeFollowTweet(freshF));
     if (ok || tid) for (const s of freshF) { state.lastSent[`${s.tf}:${s.kind}`] = now; state.lastSent[`${s.tf}:${s.kind}:${s.bar.t}`] = now; }
     const log = (await loadMeta<AlertLogItem[]>(env, "alert_log")) ?? [];
-    await saveMeta(env, "alert_log", [...log, ...freshF.map((s) => ({ at: now, tf: s.tf, side: s.kind, close: s.bar.close, level: s.level, volRatio: s.volRatio, sent: ok, text: `${FOLLOW_LABEL[s.kind]} 終${s.bar.close.toLocaleString("ja-JP", { maximumFractionDigits: 0 })}` }))].slice(-100));
+    await saveMeta(env, "alert_log", [...log, ...freshF.map((s) => ({ at: now, tf: s.tf, side: s.kind, close: s.bar.close, level: s.level, volRatio: s.volRatio, sent: ok, text: `${FOLLOW_LABEL[s.kind]} 終${s.bar.close.toLocaleString("ja-JP", { maximumFractionDigits: 0 })}${s.judge ? ` 反転${s.judge.reversal}/継続${s.judge.continuation}` : ""}` }))].slice(-100));
   }
   state.lastRun = { at: now, ok: !note, note: note || `ok (${signals.length} climax, ${follows.length} follow/break, ${pending.length} pending)`, checked };
   await saveMeta(env, "alert_state", state);
@@ -316,7 +325,16 @@ app.get("/api/intraday", async (c) => {
     const base = levelsFrom(dl);
     const lv = base && shiftLevels(base, src.offset);
     c.header("Cache-Control", `public, max-age=${src.source === "mt5" ? 20 : 60}`);
-    return c.json({ symbol: src.symbol, source: src.source, tf: tf.tf, label: tf.label, bars: src.bars.slice(-400), levels: lv, climax: scanClimax(src.bars, lv, tf.tf, src.profile) });
+    const done = src.bars.filter((b) => b.volume > 0);
+    const li = done.length - 1;
+    const pick = (j: ReturnType<typeof judgeAt>) => j && { verdict: j.verdict, label: VERDICT_LABEL[j.verdict], capitulation: j.capitulation, reversal: j.reversal, continuation: j.continuation, reasons: j.reasons, rsi: Math.round(j.tech.rsi), stretch: +j.tech.stretch.toFixed(2), divergence: j.tech.divergence };
+    const climax = scanClimax(src.bars, lv, tf.tf, src.profile).map((x) => {
+      const i = done.findIndex((b) => b.t === x.t);
+      const j = i >= 0 ? judgeAt(done, i, tf.tf, x.side === "bottom" ? "down" : "up", src.profile) : null;
+      return { ...x, verdict: j?.verdict ?? null, capitulation: j?.capitulation ?? null };
+    });
+    const judge = li >= 30 ? { t: done[li].t, down: pick(judgeAt(done, li, tf.tf, "down", src.profile)), up: pick(judgeAt(done, li, tf.tf, "up", src.profile)), energy: energyAt(done, li, tf.tf, src.profile) } : null;
+    return c.json({ symbol: src.symbol, source: src.source, tf: tf.tf, label: tf.label, bars: src.bars.slice(-400), levels: lv, climax, judge });
   } catch (e) { return c.json({ error: String(e).slice(0, 200) }, 500); }
 });
 /**

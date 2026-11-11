@@ -12,6 +12,7 @@
  *   損益分岐(先物換算 = 日経平均ベースの損益分岐 + ベーシス)との距離 ≤ LEVEL_PCT、または足がその水準をまたいだ
  */
 import type { DailyAnalysis, DailyStrike } from "./daily";
+import { judgeAt, judgeText, tierOf, type Judge } from "./technicals";
 
 export const TIMEFRAMES = [
   { tf: "5m", label: "5分足", range: "2d" },
@@ -65,6 +66,8 @@ export interface Signal {
   level: number; distPct: number; crossed: boolean; beyond?: boolean; // beyond = 足全体が損益分岐の外(売り手が損失圏)
   stats: { avgVol: number; avgRange: number };
   inProgress: boolean; elapsed: number; // 進行中の足での速報か(経過割合)
+  judge?: Judge | null; // テクニカル判定(投げ度・反転・継続)
+  tier?: "高" | "中" | "低"; // 投げ度による強さ。低はメール・X に送らない
 }
 
 /** 判定対象にする足の古さの上限(分)。Yahoo の 5分足・15分足は 10〜20 分遅れて届くことがあるため余裕を持たせる */
@@ -93,11 +96,16 @@ const afterBreak = (done: IBar[], idx: number) => {
  * 出来高の比較基準: 直近 LOOKBACK 本の平均と、同じ時間帯の平常出来高(過去 20 日の中央値)の大きい方。
  * 早朝・寄り付きなど毎日決まって出来高が膨らむ時間帯で、直近の静かな足と比べて「急増」と誤判定しないため
  */
-const baseVolume = (prev: IBar[], bar: IBar, tf: Tf, profile?: VolProfile) => {
+export const baseVolume = (prev: IBar[], bar: IBar, tf: Tf, profile?: VolProfile) => {
   const avg = prev.reduce((s, b) => s + b.volume, 0) / prev.length;
   const slot = profile?.[slotOf(bar.t, tf)];
   return slot && slot > avg ? slot : avg;
 };
+
+function withJudge(sig: Signal, done: IBar[], idx: number, profile?: VolProfile): Signal {
+  const j = judgeAt(done, idx, sig.tf, sig.side === "bottom" ? "down" : "up", profile, sig.elapsed);
+  return { ...sig, judge: j, tier: j ? tierOf(j.capitulation) : "中" };
+}
 
 export function detect(tf: Tf, label: string, bars: IBar[], lv: Levels, now = Date.now(), profile?: VolProfile): { signal: Signal | null; checked: IBar | null } {
   const done = bars.filter((b) => b.volume > 0);
@@ -125,13 +133,13 @@ export function detect(tf: Tf, label: string, bars: IBar[], lv: Levels, now = Da
       const crossed = bar.low <= lv.putLevel && lv.putLevel <= bar.high;
       const beyond = bar.high < lv.putLevel; // 足全体が損益分岐より下(売り手が損失圏)
       const distPct = crossed || beyond ? 0 : (bar.low - lv.putLevel) / bar.close;
-      if (crossed || beyond || distPct <= LEVEL_PCT) return { signal: { tf, label, side: "bottom", bar, volRatio, rangeRatio, level: lv.putLevel, crossed, beyond, distPct, stats, inProgress, elapsed }, checked };
+      if (crossed || beyond || distPct <= LEVEL_PCT) return { signal: withJudge({ tf, label, side: "bottom", bar, volRatio, rangeRatio, level: lv.putLevel, crossed, beyond, distPct, stats, inProgress, elapsed }, done, idx, profile), checked };
     }
     if (bar.close > bar.open && pos >= 0.66 && lv.callLevel != null) {
       const crossed = bar.low <= lv.callLevel && lv.callLevel <= bar.high;
       const beyond = bar.low > lv.callLevel;
       const distPct = crossed || beyond ? 0 : (lv.callLevel - bar.high) / bar.close;
-      if (crossed || beyond || distPct <= LEVEL_PCT) return { signal: { tf, label, side: "top", bar, volRatio, rangeRatio, level: lv.callLevel, crossed, beyond, distPct, stats, inProgress, elapsed }, checked };
+      if (crossed || beyond || distPct <= LEVEL_PCT) return { signal: withJudge({ tf, label, side: "top", bar, volRatio, rangeRatio, level: lv.callLevel, crossed, beyond, distPct, stats, inProgress, elapsed }, done, idx, profile), checked };
     }
   }
   return { signal: null, checked };
@@ -155,14 +163,15 @@ const yen = (n: number) => Math.round(n).toLocaleString("ja-JP");
 export function composeMail(signals: Signal[], lv: Levels, siteUrl: string): { subject: string; text: string } {
   const s0 = signals[0];
   const kind = (s: Signal) => (s.side === "bottom" ? "大底候補" : "天井候補");
-  const subject = `【opt225】${s0.inProgress ? "速報 " : ""}${kind(s0)}: ${signals.map((s) => s.label).join("・")} 出来高急増の${s0.side === "bottom" ? "下落" : "上昇"} @ ${yen(s0.bar.close)}(${jst(s0.bar.t).slice(6, 11)}〜)`;
+  const subject = `【opt225】${s0.inProgress ? "速報 " : ""}${kind(s0)}${s0.tier ? `[投げ度${s0.tier}]` : ""}: ${signals.map((s) => s.label).join("・")} 出来高急増の${s0.side === "bottom" ? "下落" : "上昇"} @ ${yen(s0.bar.close)}(${jst(s0.bar.t).slice(6, 11)}〜)`;
   const body = signals.map((s) => [
     `■ ${kind(s)}(${s.label}) ${jst(s.bar.t)} の足${s.inProgress ? `(進行中・${Math.round(s.elapsed * 100)}%経過時点の速報。出来高・値幅は経過時間で按分して判定)` : ""}`,
     `  ${s.label.includes("MT5") ? "日経225 CFD(XS MT5)" : `日経225先物(CME ${SYMBOL})`} 始${yen(s.bar.open)} 高${yen(s.bar.high)} 安${yen(s.bar.low)} 終${yen(s.bar.close)}`,
     `  出来高 ${yen(s.bar.volume)}(直近${LOOKBACK}本平均の ${s.volRatio.toFixed(1)}倍${s.inProgress ? "・按分後" : ""})、値幅 ${yen(s.bar.high - s.bar.low)}(平均の ${s.rangeRatio.toFixed(1)}倍)`,
     `  ${s.side === "bottom" ? "プット売り手の損益分岐" : "コール売り手の損益分岐"} ${yen(s.level)}(先物換算、日経平均ベース ${yen(s.side === "bottom" ? lv.putBreakeven! : lv.callBreakeven!)} + ベーシス ${lv.basis >= 0 ? "+" : ""}${yen(lv.basis)})`,
     `  ${levelText(s.side, s.level, s.bar.close)}${s.crossed ? "。この足で損益分岐をまたぎました" : ""}`,
-  ].join("\n")).join("\n\n");
+    s.judge ? judgeText(s.judge) : "",
+  ].filter(Boolean).join("\n")).join("\n\n");
   const text = `${body}
 
 出来高を伴う大きな${s0.side === "bottom" ? "下落" : "上昇"}足が、オプション売り手全体が損失に転じる水準の近くで出ました。
@@ -270,60 +279,73 @@ export interface FollowSignal {
   ref?: Pending; // 元のクライマックス
   level: number;
   volRatio: number;
+  judge?: Judge | null;
 }
 
 const doneBars = (bars: IBar[], tf: Tf, now: number) => bars.filter((b) => b.volume > 0 && b.t * 1000 + tfMinutes(tf) * 60000 <= now);
 
 /**
- * クライマックス後の決着: 大底候補なら、
- *  - その後の確定足の終値がクライマックス足の中値((高値+安値)/2)を上回った → 大底確認(反発)
- *  - クライマックス足の安値を下回って引け、出来高も基準の 1.3 倍以上 → 下落ブレイク(続落)
- * 天井候補はその逆。FOLLOW_BARS 本のうちに決着しなければ判定を打ち切る
+ * クライマックス後の決着(慎重版)。大底候補なら、FOLLOW_BARS 本の確定足のうちに:
+ *  - 大底確認: 終値がクライマックス足の中値を上回り、その間にクライマックス足の安値を(0.05%超)更新しておらず、
+ *    テクニカル判定で「反転」の点数が「継続」以上
+ *  - 下落ブレイク: クライマックス足の安値を下回る終値が 2 本続いた(出来高 1.3 倍以上の足を含む)、
+ *    または 1 本でも出来高 1.3 倍以上で、継続 60 点以上かつ反転より 10 点以上高い
+ * 天井候補はその逆。どちらにも当たらなければ判定を打ち切る(通知しない)
  */
+export const NEW_EXTREME_TOL = 0.0005;
 export function followUp(p: Pending, bars: IBar[], now = Date.now(), profile?: VolProfile): { signal: FollowSignal | null; expired: boolean } {
   const done = doneBars(bars, p.tf, now);
   const i0 = done.findIndex((b) => b.t > p.t);
   if (i0 < 0) return { signal: null, expired: now - p.t * 1000 > (FOLLOW_BARS[p.tf] + 2) * tfMinutes(p.tf) * 60000 };
   const after = done.slice(i0, i0 + FOLLOW_BARS[p.tf]);
   const mid = (p.high + p.low) / 2;
+  const bottom = p.side === "bottom";
+  let newExtreme = false, beyondCount = 0, beyondVol = false;
   for (let k = 0; k < after.length; k++) {
     const b = after[k];
     const idx = i0 + k;
     const prev = done.slice(Math.max(0, idx - LOOKBACK), idx);
     const base = prev.length ? baseVolume(prev, b, p.tf, profile) : b.volume;
     const volRatio = base > 0 ? b.volume / base : 0;
-    if (p.side === "bottom") {
-      if (b.close < p.low && volRatio >= BREAK_VOL) return { signal: { kind: "break-down", tf: p.tf, label: p.label, bar: b, ref: p, level: p.level, volRatio }, expired: false };
-      if (b.close > mid) return { signal: { kind: "confirm-bottom", tf: p.tf, label: p.label, bar: b, ref: p, level: p.level, volRatio }, expired: false };
-    } else {
-      if (b.close > p.high && volRatio >= BREAK_VOL) return { signal: { kind: "break-up", tf: p.tf, label: p.label, bar: b, ref: p, level: p.level, volRatio }, expired: false };
-      if (b.close < mid) return { signal: { kind: "confirm-top", tf: p.tf, label: p.label, bar: b, ref: p, level: p.level, volRatio }, expired: false };
-    }
+    const j = judgeAt(done, idx, p.tf, bottom ? "down" : "up", profile);
+    const mk = (kind: FollowKind): FollowSignal => ({ kind, tf: p.tf, label: p.label, bar: b, ref: p, level: p.level, volRatio, judge: j });
+    if (bottom ? b.low < p.low * (1 - NEW_EXTREME_TOL) : b.high > p.high * (1 + NEW_EXTREME_TOL)) newExtreme = true;
+    const beyond = bottom ? b.close < p.low : b.close > p.high;
+    if (beyond) { beyondCount++; if (volRatio >= BREAK_VOL) beyondVol = true; } else beyondCount = 0;
+    const strongCont = !!j && j.continuation >= 60 && j.continuation >= j.reversal + 10;
+    if (beyond && ((beyondCount >= 2 && beyondVol) || (volRatio >= BREAK_VOL && strongCont))) return { signal: mk(bottom ? "break-down" : "break-up"), expired: false };
+    const back = bottom ? b.close > mid : b.close < mid;
+    if (back && !newExtreme && (!j || j.reversal >= j.continuation)) return { signal: mk(bottom ? "confirm-bottom" : "confirm-top"), expired: false };
   }
   return { signal: null, expired: after.length >= FOLLOW_BARS[p.tf] };
 }
 
 /**
- * 損益分岐ブレイク(クライマックス型でなくても): 直近の確定足が、出来高を伴って(基準の 1.3 倍以上)
- * 損益分岐を 0.2% 以上越えて引け、直前 6 本のうちに反対側で引けた足がある(= いま越えた)
+ * 損益分岐ブレイク(慎重版): 直近 2 本の確定足がどちらも損益分岐の外で引け(最新足は 0.2% 以上外)、
+ * そのどちらかが出来高 1.3 倍以上、その前の 6 本のうちに反対側で引けた足があり(= いま越えた)、
+ * テクニカル判定で継続 55 点以上かつ反転より高い
  *  - プット売り手の損益分岐を下抜け → 下落ブレイク(売り手のヘッジ売り・損切りで下げが加速しやすい)
  *  - コール売り手の損益分岐を上抜け → 上昇ブレイク(踏み上げ)
  */
+export const LEVEL_BREAK_CONT = 55;
 export function detectLevelBreak(tf: Tf, label: string, bars: IBar[], lv: Levels, now = Date.now(), profile?: VolProfile): FollowSignal | null {
   const done = doneBars(bars, tf, now);
-  if (done.length < LOOKBACK + 2) return null;
+  if (done.length < LOOKBACK + 3) return null;
   const idx = done.length - 1;
-  const b = done[idx];
+  const b = done[idx], b1 = done[idx - 1];
   if (now - b.t * 1000 > MAX_AGE_MIN[tf] * 60000) return null;
-  const prev = done.slice(idx - LOOKBACK, idx);
-  const volRatio = b.volume / baseVolume(prev, b, tf, profile);
+  const vr = (k: number) => done[k].volume / baseVolume(done.slice(k - LOOKBACK, k), done[k], tf, profile);
+  const volRatio = Math.max(vr(idx), vr(idx - 1));
   if (volRatio < BREAK_VOL) return null;
-  const recent = done.slice(Math.max(0, idx - BREAK_LOOKBACK), idx);
-  if (lv.putLevel != null && b.close < lv.putLevel * (1 - BREAK_MARGIN) && recent.some((r) => r.close > lv.putLevel!))
-    return { kind: "level-break-down", tf, label, bar: b, level: lv.putLevel, volRatio };
-  if (lv.callLevel != null && b.close > lv.callLevel * (1 + BREAK_MARGIN) && recent.some((r) => r.close < lv.callLevel!))
-    return { kind: "level-break-up", tf, label, bar: b, level: lv.callLevel, volRatio };
-  return null;
+  const recent = done.slice(Math.max(0, idx - 1 - BREAK_LOOKBACK), idx - 1);
+  const check = (dir: "down" | "up", level: number): FollowSignal | null => {
+    const out = dir === "down" ? b.close < level * (1 - BREAK_MARGIN) && b1.close < level : b.close > level * (1 + BREAK_MARGIN) && b1.close > level;
+    if (!out || !recent.some((r) => (dir === "down" ? r.close > level : r.close < level))) return null;
+    const j = judgeAt(done, idx, tf, dir, profile);
+    if (j && (j.continuation < LEVEL_BREAK_CONT || j.continuation <= j.reversal)) return null;
+    return { kind: dir === "down" ? "level-break-down" : "level-break-up", tf, label, bar: b, level, volRatio, judge: j };
+  };
+  return (lv.putLevel != null ? check("down", lv.putLevel) : null) ?? (lv.callLevel != null ? check("up", lv.callLevel) : null);
 }
 
 export const FOLLOW_LABEL: Record<FollowSignal["kind"], string> = {
@@ -347,13 +369,14 @@ export function composeFollowMail(sigs: FollowSignal[], lv: Levels, siteUrl: str
     ];
     if (s.ref) lines.push(`  元の${s.ref.side === "bottom" ? "大底候補" : "天井候補"}: ${jst(s.ref.t)} の足(高${yen(s.ref.high)} 安${yen(s.ref.low)}、中値 ${yen((s.ref.high + s.ref.low) / 2)})`);
     lines.push(`  ${levelText(side(s), s.level, s.bar.close)}`);
+    if (s.judge) lines.push(judgeText(s.judge));
     return lines.join("\n");
   }).join("\n\n");
   const why: Record<FollowSignal["kind"], string> = {
-    "confirm-bottom": "大底候補の足のあと、終値がその足の中値を上回りました。売り手の投げが一巡して反発に転じた可能性があります。",
-    "confirm-top": "天井候補の足のあと、終値がその足の中値を下回りました。買い戻しが一巡して反落に転じた可能性があります。",
-    "break-down": "大底候補の足の安値を、出来高を伴って下回って引けました。投げが一巡せず、下げが続く(続落)可能性があります。",
-    "break-up": "天井候補の足の高値を、出来高を伴って上回って引けました。踏み上げが続く(続伸)可能性があります。",
+    "confirm-bottom": "大底候補の足のあと、安値を更新せずに終値がその足の中値を上回り、テクニカルも反転側が優勢です。含み損を抱えた買い方の投げが一巡して反発に転じた可能性があります。",
+    "confirm-top": "天井候補の足のあと、高値を更新せずに終値がその足の中値を下回り、テクニカルも反転側が優勢です。売り方の買い戻しが一巡して反落に転じた可能性があります。",
+    "break-down": "大底候補の足の安値を下回る引けが続き(または出来高を伴い継続側のテクニカルが強く)、投げが一巡していません。下げが続く(続落)可能性があります。",
+    "break-up": "天井候補の足の高値を上回る引けが続き(または出来高を伴い継続側のテクニカルが強く)、踏み上げが一巡していません。続伸の可能性があります。",
     "level-break-down": "出来高を伴ってプット売り手全体の損益分岐を割り込みました。売り手のヘッジ売り・損切りで下げが加速しやすい局面です。",
     "level-break-up": "出来高を伴ってコール売り手全体の損益分岐を上抜けました。売り手の買い戻し(踏み上げ)で上げが加速しやすい局面です。",
   };

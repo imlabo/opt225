@@ -12,6 +12,9 @@ import { squeezeRaw, squeezeScore, upsertHist, type SqueezeHist } from "./squeez
 import { composeFarMail, farQuotes, farSignals, sendMail, type AlertLogItem } from "./alerts";
 import { composeTweet, postTweet } from "./x";
 
+/** X への投稿を一時停止中(true の間は日次まとめ・アラートとも投稿しない)。再開するときは false にする */
+export const X_PAUSED = true;
+
 export interface RunResult {
   ingested: string[];
   analyzed?: string;
@@ -76,7 +79,7 @@ export async function analyzeAndPost(env: Env, forcePost = false) {
 
   const text = composeTweet(latest, env.SITE_URL);
   const creds = xCreds(env);
-  if (env.X_POST_ENABLED !== "true" || !creds) {
+  if (X_PAUSED || env.X_POST_ENABLED !== "true" || !creds) {
     await logPost(env, latest.weekEnd, text, "dry_run");
     return { analyzed: latest.weekEnd, post: { status: "dry_run", text } };
   }
@@ -126,7 +129,7 @@ export async function ingestDaily(env: Env, d: DailyInput, forcePost = false) {
   const text = composeDailyTweet(a, env.SITE_URL, learn.prediction, learn.lastResult, learn.fg);
   if (!forcePost && (await wasDailyPosted(env, a.tradeDate))) return { analysis: a, learn, post: { status: "already_posted" } };
   const creds = xCreds(env);
-  if (env.X_POST_ENABLED !== "true" || !creds) {
+  if (X_PAUSED || env.X_POST_ENABLED !== "true" || !creds) {
     await logDailyPost(env, a.tradeDate, text, "dry_run");
     return { analysis: a, learn, post: { status: "dry_run", text } };
   }
@@ -185,7 +188,7 @@ export async function learnAndPredict(env: Env, a: DailyAnalysis) {
 /** X 投稿が有効なら投稿して tweet id を返す。無効・失敗は null */
 export async function tryTweet(env: Env, text: string): Promise<string | null> {
   const creds = xCreds(env);
-  if (env.X_POST_ENABLED !== "true" || !creds) return null;
+  if (X_PAUSED || env.X_POST_ENABLED !== "true" || !creds) return null;
   try { return await postTweet(text, creds); } catch (e) { console.log(`tweet failed: ${String(e).slice(0, 200)}`); return null; }
 }
 

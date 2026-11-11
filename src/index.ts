@@ -241,6 +241,10 @@ ${env.SITE_URL}`);
   let newSamples = 0;
   const checked: NonNullable<AlertState["lastRun"]>["checked"] = {};
   let htf: ReturnType<typeof techAt> = null;
+  const capMinNow = () => 40 + judgeAdj().climax;
+  // 天井・大底として通知しない理由(空なら通知してよい)。通知しないクライマックスは、後で「確認」も出さない(ブレイクだけ見る)
+  const gateWhy = (s: Signal) => (!s.judge ? "" : s.judge.capitulation < capMinNow() ? `投げ度 ${s.judge.capitulation}(基準 ${capMinNow()} 未満)`
+    : reversalOk(s.judge, judgeAdj().climax, { beyond: !!s.beyond || (s.side === "top" ? s.bar.close > s.level : s.bar.close < s.level), htf: s.tf === "60m" ? null : htf }).why);
   const signals: Signal[] = [];
   const follows: FollowSignal[] = [];
   let pending = state.pending ?? [];
@@ -266,7 +270,7 @@ ${env.SITE_URL}`);
           // 大底候補・天井候補は、その後の足で「反転」か「ブレイク」かを判定するため記録(進行中の足は確定してから)
           const b = d.signal.bar;
           if (!d.signal.inProgress && !pending.some((p) => p.tf === tf && p.side === d.signal!.side && p.t === b.t))
-            pending.push({ tf, side: d.signal.side, t: b.t, open: b.open, high: b.high, low: b.low, close: b.close, level: d.signal.level, label: lab });
+            pending.push({ tf, side: d.signal.side, t: b.t, open: b.open, high: b.high, low: b.low, close: b.close, level: d.signal.level, label: lab, contOnly: !!gateWhy(d.signal) });
         }
         // 判定待ちの決着
         const keep: Pending[] = [];
@@ -316,10 +320,9 @@ ${env.SITE_URL}`);
   const now = Date.now();
   // 投げ度「低」(含み損の投げ・行き過ぎの材料が乏しい)は送らず、記録だけ残す
   // しきい値は 40 + 当たり率に応じた上乗せ(当たりが悪いほど厳しく)
-  const capMin = 40 + judgeAdj().climax;
+  const capMin = capMinNow();
   // 天井・大底は「反転の決め手」があり、反転が継続を上回るときだけ(流れに乗ったブレイクの初動は送らない)
-  const whyNot = (s: Signal) => (!s.judge ? "" : s.judge.capitulation < capMin ? `投げ度 ${s.judge.capitulation}(基準 ${capMin} 未満)`
-    : reversalOk(s.judge, judgeAdj().climax, { beyond: !!s.beyond || (s.side === "top" ? s.bar.close > s.level : s.bar.close < s.level), htf: s.tf === "60m" ? null : htf }).why);
+  const whyNot = gateWhy;
   const isWeak = (s: Signal) => !!whyNot(s);
   const weak = signals.filter((s) => isWeak(s) && !opts.force);
   const fresh = signals.filter((s) => (opts.force || !isWeak(s)) && (opts.force || (now - (state.lastSent[`${s.tf}:${s.side}`] ?? 0) > COOLDOWN_BY_TF[s.tf] * 60 * 1000 && !state.lastSent[`${s.tf}:${s.side}:${s.bar.t}`])));

@@ -269,7 +269,7 @@ export const BREAK_MARGIN = 0.002; // 損益分岐ブレイク: 終値が損益�
 export const BREAK_LOOKBACK = 6; // 損益分岐ブレイク: 直近 6 本のうちに反対側で引けた足がある(=今まさに越えた)
 
 /** 判定待ちのクライマックス(大底候補・天井候補) */
-export interface Pending { tf: Tf; side: "bottom" | "top"; t: number; open: number; high: number; low: number; close: number; level: number; label: string }
+export interface Pending { tf: Tf; side: "bottom" | "top"; t: number; open: number; high: number; low: number; close: number; level: number; label: string; contOnly?: boolean } // contOnly = 天井・大底として通知しなかったもの(確認は出さず、ブレイクだけ見る)
 
 export type FollowKind = "confirm-bottom" | "confirm-top" | "break-down" | "break-up";
 export interface FollowSignal {
@@ -319,7 +319,7 @@ export function followUp(p: Pending, bars: IBar[], now = Date.now(), profile?: V
     // 確認は慎重に: 反転が継続より 10 点以上(+上乗せ)高く、大きな流れが同じ向きならクライマックス足の始値まで戻すこと
     const engulf = bottom ? b.close > p.open : b.close < p.open;
     const trendWith = !!j && (bottom ? -j.tech.trend : j.tech.trend) >= 1.5;
-    if (back && !newExtreme && (!j || (j.reversal >= j.continuation + 10 + adj.confirm && (engulf || !trendWith)))) return { signal: mk(bottom ? "confirm-bottom" : "confirm-top"), expired: false };
+    if (back && !p.contOnly && !newExtreme && (!j || (j.reversal >= j.continuation + 10 + adj.confirm && (engulf || !trendWith)))) return { signal: mk(bottom ? "confirm-bottom" : "confirm-top"), expired: false };
   }
   return { signal: null, expired: after.length >= FOLLOW_BARS[p.tf] };
 }

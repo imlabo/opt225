@@ -128,6 +128,8 @@ describe("reversal or breakout after a climax", () => {
     // 反発: 次の足の終値が中値 60,805 を上回る
     const up = bars.slice(0, 27); up[26] = { t: t + 300, open: 60620, high: 60900, low: 60610, close: 60850, volume: 900 };
     expect(followUp(p, up, (t + 900) * 1000).signal?.kind).toBe("confirm-bottom");
+    // 大底として通知しなかったクライマックス(継続優勢)からは「確認」を出さない
+    expect(followUp({ ...p, contOnly: true }, up, (t + 900) * 1000).signal).toBeNull();
     // 1 本だけ安値を割って引けても、まだブレイクとはしない(慎重判定)
     const dn = bars.slice(0, 28); dn[26] = { t: t + 300, open: 60620, high: 60630, low: 60400, close: 60450, volume: 2500 };
     expect(followUp(p, dn.slice(0, 27), (t + 900) * 1000).signal).toBeNull();

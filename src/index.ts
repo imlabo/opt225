@@ -237,7 +237,7 @@ ${env.SITE_URL}`);
   const learnNow = send && Date.now() - (state.lastLearn ?? 0) > LEARN_EVERY_MS;
   let watch = learnNow ? current((await loadMeta<Watch[]>(env, "judge_watch")) ?? []) : [];
   const samples = learnNow ? current((await loadMeta<Sample[]>(env, "judge_samples")) ?? []) : [];
-  if (model && (model as { v?: number }).v !== 2) { model = null; setJudgeModel(null); } // 定義を変えたので学習し直す
+  if (model && (model as { v?: number }).v !== 3) { model = null; setJudgeModel(null); } // 定義を変えたので学習し直す
   let newSamples = 0;
   const checked: NonNullable<AlertState["lastRun"]>["checked"] = {};
   const signals: Signal[] = [];
@@ -320,7 +320,7 @@ ${env.SITE_URL}`);
     }
     const tweetId = await tryTweet(env, composeAlertTweet(fresh, env.SITE_URL));
     if (sent || tweetId) for (const s of fresh) { state.lastSent[`${s.tf}:${s.side}`] = now; state.lastSent[`${s.tf}:${s.side}:${s.bar.t}`] = now; }
-    for (const s of fresh) if (!s.inProgress) addWatch(watchFrom(s.tf, s.bar.t, `alert-${s.side}`, s.judge, s.bar.close, !!(sent || tweetId)));
+    for (const s of fresh) if (!s.inProgress) addWatch(watchFrom(s.tf, s.bar.t, `alert-${s.side}`, s.judge, s.bar.close, !!(sent || tweetId), s.side === "top" ? s.bar.high : s.bar.low));
     // 古い足のキーは掃除
     for (const k of Object.keys(state.lastSent)) if (k.split(":").length >= 3 && now - state.lastSent[k] > 864e5) delete state.lastSent[k];
     const log = (await loadMeta<AlertLogItem[]>(env, "alert_log")) ?? [];
@@ -336,7 +336,7 @@ ${env.SITE_URL}`);
     }
     const tid = await tryTweet(env, composeFollowTweet(freshF));
     if (ok || tid) for (const s of freshF) { state.lastSent[`${s.tf}:${s.kind}`] = now; state.lastSent[`${s.tf}:${s.kind}:${s.bar.t}`] = now; }
-    for (const s of freshF) addWatch(watchFrom(s.tf, s.bar.t, s.kind, s.judge, s.bar.close, !!(ok || tid)));
+    for (const s of freshF) addWatch(watchFrom(s.tf, s.bar.t, s.kind, s.judge, s.bar.close, !!(ok || tid), s.ref ? (s.ref.side === "top" ? s.ref.high : s.ref.low) : undefined));
     const log = (await loadMeta<AlertLogItem[]>(env, "alert_log")) ?? [];
     await saveMeta(env, "alert_log", [...log, ...freshF.map((s) => ({ at: now, tf: s.tf, side: s.kind, close: s.bar.close, level: s.level, volRatio: s.volRatio, sent: ok, text: `${FOLLOW_LABEL[s.kind]} 終${s.bar.close.toLocaleString("ja-JP", { maximumFractionDigits: 0 })}${s.judge ? ` 反転${s.judge.reversal}/継続${s.judge.continuation}` : ""}` }))].slice(-100));
   }
@@ -369,7 +369,7 @@ app.get("/api/judge/backtest", async (c) => {
   const rows = scanClimax(done, lv, tf.tf, src.profile).map((x) => {
     const i = done.findIndex((b) => b.t === x.t);
     const j = judgeAt(done, i, tf.tf, x.side === "bottom" ? "down" : "up", src.profile);
-    const y = j ? outcome(done, i, j.dir, tf.tf, done[i].close, j.tech.atr) : null;
+    const y = j ? outcome(done, i, j.dir, tf.tf, done[i].close, j.tech.atr) : null; // 極値はその足の高値・安値
     const gate = j ? (j.capitulation < 40 ? `投げ度${j.capitulation}` : reversalOk(j).why) : "no data";
     return { t: x.t, side: x.side, near: x.near, close: done[i].close, cap: j?.capitulation, rev: j?.reversal, con: j?.continuation, send: !gate, why: gate, y };
   });

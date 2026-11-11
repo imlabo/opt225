@@ -481,6 +481,12 @@ app.get("/api/posts", async (c) => {
   const w = await c.env.DB.prepare("SELECT week_end AS key, tweet_id, text, status, error, posted_at FROM posts ORDER BY week_end DESC LIMIT 3").all();
   return c.json({ daily: d.results, weekly: w.results });
 });
+/** 直近のアラート(キャッシュなし・確認用) */
+app.get("/api/alerts/recent/:nonce?", async (c) => {
+  c.header("Cache-Control", "no-store");
+  const st = await loadMeta<AlertState>(c.env, "alert_state");
+  return c.json({ now: Date.now(), lastRun: st?.lastRun, pending: st?.pending, log: ((await loadMeta<AlertLogItem[]>(c.env, "alert_log")) ?? []).slice(-12) });
+});
 app.get("/api/alerts", async (c) => c.json({ cron: ((await loadMeta<unknown[]>(c.env, "cron_log")) ?? []).slice(-5), mail: await loadMeta<unknown>(c.env, "alert_test_sent"), state: await loadMeta<AlertState>(c.env, "alert_state"), log: ((await loadMeta<AlertLogItem[]>(c.env, "alert_log")) ?? []).slice(-20) }));
 /** 手動で判定(?send=1 で送信、?force=1 でクールダウン無視) */
 app.post("/admin/alert-check", async (c) => c.json(await runAlerts(c.env, { send: c.req.query("send") === "1", force: c.req.query("force") === "1" })));

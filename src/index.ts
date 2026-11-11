@@ -237,7 +237,7 @@ ${env.SITE_URL}`);
   const learnNow = send && Date.now() - (state.lastLearn ?? 0) > LEARN_EVERY_MS;
   let watch = learnNow ? current((await loadMeta<Watch[]>(env, "judge_watch")) ?? []) : [];
   const samples = learnNow ? current((await loadMeta<Sample[]>(env, "judge_samples")) ?? []) : [];
-  if (model && (model as { v?: number }).v !== 3) { model = null; setJudgeModel(null); } // 定義を変えたので学習し直す
+  if (model && (model as { v?: number }).v !== 4) { model = null; setJudgeModel(null); } // 定義を変えたので学習し直す
   let newSamples = 0;
   const checked: NonNullable<AlertState["lastRun"]>["checked"] = {};
   const signals: Signal[] = [];

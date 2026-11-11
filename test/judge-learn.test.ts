@@ -9,24 +9,24 @@ afterEach(() => setJudgeModel(null));
 
 describe("outcome", () => {
   it("labels which way price moved one ATR first", () => {
-    const b = flat(50);
-    b[20] = { ...b[20], high: 62300 }; // 上へ ATR 2 本分以上
+    const b = flat(90);
+    b[20] = { ...b[20], high: 62300 }; // 上へ 0.4% 以上
     expect(outcome(b, 10, "down", "5m", 62000, 100)).toBe("rev"); // 大底候補: 安値を割らずに +200 → 反転
     expect(outcome(b, 10, "up", "5m", 62000, 100)).toBe("con"); // 天井候補: 高値 62,030 を +100 以上更新 → 継続
     // 天井候補で、高値を少し更新してから下げた → 天井としては不正解(none)
-    const c = flat(50); c[15] = { ...c[15], high: 62080 }; c[20] = { ...c[20], low: 61700 };
+    const c = flat(90); c[15] = { ...c[15], high: 62080 }; c[20] = { ...c[20], low: 61700 };
     expect(outcome(c, 10, "up", "5m", 62000, 100)).toBe("none");
-    expect(outcome(flat(50), 10, "down", "5m", 62000, 100)).toBe("none");
-    expect(outcome(flat(40), 10, "down", "5m", 62000, 100)).toBeNull(); // まだ 36 本たっていない
+    expect(outcome(flat(90), 10, "down", "5m", 62000, 100)).toBe("none");
+    expect(outcome(flat(60), 10, "down", "5m", 62000, 100)).toBeNull(); // まだ 72 本たっていない
   });
 });
 
 describe("collect and resolve", () => {
   it("watches climax bars and grades them after the horizon", () => {
-    const b = flat(130);
+    const b = flat(170);
     b[50] = { ...b[50], open: 62000, high: 62010, low: 61400, close: 61450, volume: 6000 };
-    for (let i = 51; i < 130; i++) b[i] = { ...b[i], open: 61500, high: 61900, low: 61480, close: 61850 };
-    const now = (b[129].t + 600) * 1000;
+    for (let i = 51; i < 170; i++) b[i] = { ...b[i], open: 61500, high: 61900, low: 61480, close: 61850 };
+    const now = (b[169].t + 600) * 1000;
     const r = collectAndResolve("5m", b, undefined, [], [], now);
     expect(r.added).toBeGreaterThanOrEqual(1);
     expect(r.resolved.find((s) => s.t === b[50].t)?.y).toBe("rev");

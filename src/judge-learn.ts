@@ -10,10 +10,12 @@ import { type IBar, type Tf, type VolProfile, scanClimax } from "./alerts";
 import { featureVec, techAt, LEARN_MIN_N, type Judge, type JudgeModel } from "./technicals";
 import { fitLogistic } from "./model";
 
-export const HORIZON: Record<Tf, number> = { "5m": 36, "15m": 16, "60m": 10 }; // 3時間・4時間・10時間
-export const REV_ATR = 2.0; // 反転: 極値を更新せずに ATR 2 本分戻す
-export const CON_ATR = 1.0; // 継続: 極値を ATR 1 本分以上更新
-export const JUDGE_VERSION = 3; // 特徴量・答え合わせの定義を変えたら上げる(古いデータは捨てて取り直す)
+export const HORIZON: Record<Tf, number> = { "5m": 72, "15m": 32, "60m": 16 }; // 6時間・8時間・16時間(その日の流れで見る)
+export const REV_ATR = 2.0; // 反転: 極値を更新せずに ATR 2 本分、かつ REV_PCT 以上戻す
+export const REV_PCT: Record<Tf, number> = { "5m": 0.004, "15m": 0.006, "60m": 0.01 }; // 0.4%・0.6%・1.0%(日経で約250〜600円)
+export const CON_ATR = 1.0; // 継続: 極値を ATR 1 本分、かつ CON_PCT 以上更新
+export const CON_PCT = 0.002;
+export const JUDGE_VERSION = 4; // 特徴量・答え合わせの定義を変えたら上げる(古いデータは捨てて取り直す)
 export const LEARN_EVERY_MS = 15 * 60 * 1000;
 export const MAX_SAMPLES = 1500;
 export const MAX_WATCH = 300;
@@ -38,16 +40,17 @@ export function watchFrom(tf: Tf, t: number, kind: string, j: Judge | null | und
 
 /**
  * 答え合わせ(「本当に天井・大底だったか」を見る)。ext = その動きの極値(天井候補ならクライマックス足の高値)
- *  - rev(反転): 極値を更新する前に、終値から REV_ATR × ATR 逆へ動いた
- *  - con(継続): 逆へ REV_ATR 動く前に、極値を CON_ATR × ATR 以上更新した
+ *  - rev(反転): 極値を更新する前に、終値から max(ATR 2 本, 0.4〜1.0%) 逆へ動いた
+ *  - con(継続): それより先に、極値を max(ATR 1 本, 0.2%) 以上更新した
  *  - none: どちらもなし(極値を少し更新しただけ、または動かず)
  * まだ HORIZON 本たっていなければ null
  */
 export function outcome(bars: IBar[], i: number, dir: "down" | "up", tf: Tf, close: number, atr: number, ext?: number): Sample["y"] | null {
   const up = dir === "up";
   const e = ext ?? (up ? bars[i].high : bars[i].low);
-  const revLv = up ? close - REV_ATR * atr : close + REV_ATR * atr;
-  const conLv = up ? e + CON_ATR * atr : e - CON_ATR * atr;
+  const rv = Math.max(REV_ATR * atr, REV_PCT[tf] * close), cv = Math.max(CON_ATR * atr, CON_PCT * close);
+  const revLv = up ? close - rv : close + rv;
+  const conLv = up ? e + cv : e - cv;
   let broke = false; // 極値を更新した(天井・大底としては失敗)
   const after = bars.slice(i + 1, i + 1 + HORIZON[tf]);
   for (const b of after) {

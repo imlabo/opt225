@@ -1,4 +1,5 @@
-import { judgeAt, energyAt, VERDICT_LABEL } from "./technicals";
+import { judgeAt, energyAt, VERDICT_LABEL, setJudgeModel, judgeAdj, type JudgeModel } from "./technicals";
+import { collectAndResolve, fitJudgeModel, watchFrom, LEARN_EVERY_MS, MAX_SAMPLES, REFIT_MS, type Watch, type Sample } from "./judge-learn";
 import { Hono } from "hono";
 import { analyze } from "./analysis";
 import { loadAnalyses, saveAnalysis, loadDailyAnalyses, loadDailyStrikes, loadEvaluated, loadHistory, loadLatestPrediction, loadMeta, loadModelLogs, loadSentiment, saveMeta, saveSentiment, updateDailyIchimoku, type SentimentPayload } from "./db";
@@ -35,13 +36,14 @@ app.get("/", async (c) => {
   const weeklyReport = await loadMeta<WeeklyReport>(c.env, "weekly_tuning");
   const alertLog = (await loadMeta<AlertLogItem[]>(c.env, "alert_log")) ?? [];
   const viHist = (await loadMeta<ViPoint[]>(c.env, "vi_hist")) ?? [];
+  const judgeModel = await loadMeta<JudgeModel>(c.env, "judge_model");
   const ichimoku = latestIchi && (!dl?.ichimoku || latestIchi.tradeDate > dl.ichimoku.result.date)
     ? { ...latestIchi.ichimoku, basis: dl?.ichimoku?.basis ?? 0 }
     : dl?.ichimoku;
   c.header("Cache-Control", "public, max-age=300");
   return c.html(renderPage({
     latest: history[history.length - 1], history, week: weeks[0], siteUrl: c.env.SITE_URL,
-    daily: { latest: dl, history: dailyHistory, strikes, squeezeHist: squeezeHist ?? [], alertLog, viHist }, ichimoku,
+    daily: { latest: dl, history: dailyHistory, strikes, squeezeHist: squeezeHist ?? [], alertLog, viHist, judgeModel }, ichimoku,
     model: { prediction, recent, logs, config: modelConfig ?? DEFAULT_CONFIG, tuning: tuningLog ?? [] },
     weekly: weeklyReport ?? undefined,
     sentiment,
@@ -229,6 +231,13 @@ ${env.SITE_URL}`);
   }
   const [dl] = (await loadDailyAnalyses(env, 1)).slice(-1);
   const lv = levelsFrom(dl);
+  // 判定の自己改善: 学習済みモデルを読み込み、15 分ごとに答え合わせと学習をする
+  let model = await loadMeta<JudgeModel>(env, "judge_model");
+  setJudgeModel(model);
+  const learnNow = send && Date.now() - (state.lastLearn ?? 0) > LEARN_EVERY_MS;
+  let watch = learnNow ? ((await loadMeta<Watch[]>(env, "judge_watch")) ?? []) : [];
+  const samples = learnNow ? ((await loadMeta<Sample[]>(env, "judge_samples")) ?? []) : [];
+  let newSamples = 0;
   const checked: NonNullable<AlertState["lastRun"]>["checked"] = {};
   const signals: Signal[] = [];
   const follows: FollowSignal[] = [];
@@ -263,20 +272,40 @@ ${env.SITE_URL}`);
         // 損益分岐ブレイク
         const lb = detectLevelBreak(tf, lab, src.bars, lvx, Date.now(), src.profile);
         if (lb) follows.push(lb);
+        if (learnNow) {
+          const r = collectAndResolve(tf, src.bars, src.profile, watch, samples);
+          watch = r.watch; samples.push(...r.resolved); newSamples += r.resolved.length;
+        }
       } catch (e) { note += `${tf}: ${String(e).slice(0, 80)}; `; checked[tf] = null; }
     }
   }
   state.pending = pending.slice(-30);
+  if (learnNow) {
+    state.lastLearn = Date.now();
+    const keepS = samples.slice(-MAX_SAMPLES);
+    if (newSamples) await saveMeta(env, "judge_samples", keepS);
+    // 学習(重い計算)は 1 時間に 1 回まで。Worker の CPU 制限に収めるため直近 FIT_ROWS 件で当てる
+    if ((newSamples || state.learnDirty) && Date.now() - (model?.updatedAt ?? 0) > REFIT_MS || !model) {
+      model = fitJudgeModel(keepS);
+      setJudgeModel(model);
+      await saveMeta(env, "judge_model", model);
+      state.learnDirty = false;
+    } else if (newSamples) state.learnDirty = true;
+  }
+  const addWatch = (w: Watch | null) => { if (w && !watch.some((x) => x.tf === w.tf && x.t === w.t && x.kind === w.kind)) watch.push(w); };
   // 同じ時間足・向きは時間足ごとの間隔をあけ、同じ足は二度送らない
   const now = Date.now();
   // 投げ度「低」(含み損の投げ・行き過ぎの材料が乏しい)は送らず、記録だけ残す
-  const weak = signals.filter((s) => s.tier === "低" && !opts.force);
-  const fresh = signals.filter((s) => (opts.force || s.tier !== "低") && (opts.force || (now - (state.lastSent[`${s.tf}:${s.side}`] ?? 0) > COOLDOWN_BY_TF[s.tf] * 60 * 1000 && !state.lastSent[`${s.tf}:${s.side}:${s.bar.t}`])));
+  // しきい値は 40 + 当たり率に応じた上乗せ(当たりが悪いほど厳しく)
+  const capMin = 40 + judgeAdj().climax;
+  const isWeak = (s: Signal) => (s.judge?.capitulation ?? 100) < capMin;
+  const weak = signals.filter((s) => isWeak(s) && !opts.force);
+  const fresh = signals.filter((s) => (opts.force || !isWeak(s)) && (opts.force || (now - (state.lastSent[`${s.tf}:${s.side}`] ?? 0) > COOLDOWN_BY_TF[s.tf] * 60 * 1000 && !state.lastSent[`${s.tf}:${s.side}:${s.bar.t}`])));
   const weakNew = weak.filter((s) => !s.inProgress && !state.lastSent[`${s.tf}:${s.side}:${s.bar.t}:weak`]);
   if (weakNew.length && send) {
     for (const s of weakNew) state.lastSent[`${s.tf}:${s.side}:${s.bar.t}:weak`] = now;
     const log = (await loadMeta<AlertLogItem[]>(env, "alert_log")) ?? [];
-    await saveMeta(env, "alert_log", [...log, ...weakNew.map((s) => ({ at: now, tf: s.tf, side: s.side, close: s.bar.close, level: s.level, volRatio: s.volRatio, sent: false, text: `投げ度低(${s.judge?.capitulation ?? "-"})のため通知せず` }))].slice(-100));
+    await saveMeta(env, "alert_log", [...log, ...weakNew.map((s) => ({ at: now, tf: s.tf, side: s.side, close: s.bar.close, level: s.level, volRatio: s.volRatio, sent: false, text: `投げ度 ${s.judge?.capitulation ?? "-"}(基準 ${capMin} 未満)のため通知せず` }))].slice(-100));
   }
   let sent: boolean | undefined, mail: unknown;
   if (fresh.length && send && lv) {
@@ -288,6 +317,7 @@ ${env.SITE_URL}`);
     }
     const tweetId = await tryTweet(env, composeAlertTweet(fresh, env.SITE_URL));
     if (sent || tweetId) for (const s of fresh) { state.lastSent[`${s.tf}:${s.side}`] = now; state.lastSent[`${s.tf}:${s.side}:${s.bar.t}`] = now; }
+    for (const s of fresh) if (!s.inProgress) addWatch(watchFrom(s.tf, s.bar.t, `alert-${s.side}`, s.judge, s.bar.close, !!(sent || tweetId)));
     // 古い足のキーは掃除
     for (const k of Object.keys(state.lastSent)) if (k.split(":").length >= 3 && now - state.lastSent[k] > 864e5) delete state.lastSent[k];
     const log = (await loadMeta<AlertLogItem[]>(env, "alert_log")) ?? [];
@@ -303,14 +333,28 @@ ${env.SITE_URL}`);
     }
     const tid = await tryTweet(env, composeFollowTweet(freshF));
     if (ok || tid) for (const s of freshF) { state.lastSent[`${s.tf}:${s.kind}`] = now; state.lastSent[`${s.tf}:${s.kind}:${s.bar.t}`] = now; }
+    for (const s of freshF) addWatch(watchFrom(s.tf, s.bar.t, s.kind, s.judge, s.bar.close, !!(ok || tid)));
     const log = (await loadMeta<AlertLogItem[]>(env, "alert_log")) ?? [];
     await saveMeta(env, "alert_log", [...log, ...freshF.map((s) => ({ at: now, tf: s.tf, side: s.kind, close: s.bar.close, level: s.level, volRatio: s.volRatio, sent: ok, text: `${FOLLOW_LABEL[s.kind]} 終${s.bar.close.toLocaleString("ja-JP", { maximumFractionDigits: 0 })}${s.judge ? ` 反転${s.judge.reversal}/継続${s.judge.continuation}` : ""}` }))].slice(-100));
   }
   state.lastRun = { at: now, ok: !note, note: note || `ok (${signals.length} climax, ${follows.length} follow/break, ${pending.length} pending)`, checked };
+  // 見張り(答え合わせ待ち)を保存。通知があったときは学習の回でなくても読み直して足す
+  if (learnNow) await saveMeta(env, "judge_watch", watch);
+  else if (watch.length) {
+    const cur = (await loadMeta<Watch[]>(env, "judge_watch")) ?? [];
+    for (const w of watch) if (!cur.some((x) => x.tf === w.tf && x.t === w.t && x.kind === w.kind)) cur.push(w);
+    await saveMeta(env, "judge_watch", cur.slice(-300));
+  }
   await saveMeta(env, "alert_state", state);
   return { signals: fresh, follows: freshF, sent, note: state.lastRun.note, mail };
 }
 
+/** テクニカル判定の学習状況(当たり率・通知の厳しさ・件数) */
+app.get("/api/judge/model", async (c) => {
+  const [m, w, smp] = await Promise.all([loadMeta<JudgeModel>(c.env, "judge_model"), loadMeta<Watch[]>(c.env, "judge_watch"), loadMeta<Sample[]>(c.env, "judge_samples")]);
+  c.header("Cache-Control", "no-store");
+  return c.json({ model: m, watching: w?.length ?? 0, samples: smp?.length ?? 0, recent: (smp ?? []).filter((s) => s.kind !== "climax").slice(-20).map(({ x: _x, ...r }) => r) });
+});
 /** 判定だけ実行(送信しない)。Yahoo からの取得や判定が動いているかの確認用 */
 app.get("/api/alerts/check", async (c) => {
   try { const r = await runAlerts(c.env, { send: false }); return c.json({ note: r.note, signals: r.signals.map((s) => ({ tf: s.tf, side: s.side, close: s.bar.close, level: s.level, volRatio: s.volRatio })) }); }
@@ -325,6 +369,7 @@ app.get("/api/intraday", async (c) => {
     const base = levelsFrom(dl);
     const lv = base && shiftLevels(base, src.offset);
     c.header("Cache-Control", `public, max-age=${src.source === "mt5" ? 20 : 60}`);
+    setJudgeModel(await loadMeta<JudgeModel>(c.env, "judge_model"));
     const done = src.bars.filter((b) => b.volume > 0);
     const li = done.length - 1;
     const pick = (j: ReturnType<typeof judgeAt>) => j && { verdict: j.verdict, label: VERDICT_LABEL[j.verdict], capitulation: j.capitulation, reversal: j.reversal, continuation: j.continuation, reasons: j.reasons, rsi: Math.round(j.tech.rsi), stretch: +j.tech.stretch.toFixed(2), divergence: j.tech.divergence };

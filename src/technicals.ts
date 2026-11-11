@@ -54,6 +54,7 @@ export interface Tech {
   bbWidthPct: number; // ボリンジャーバンド幅の、直近 100 本での位置(低いほど収縮 = エネルギーがたまっている)
   squeezeRelease: "down" | "up" | null; // 直前まで収縮していたバンドから外へ放れた
   obvSlope: number; // OBV の直近 20 本の傾き(出来高で正規化、−1..1)
+  atr: number; // ATR14(値幅の平均)
 }
 
 const UW_BARS: Record<Tf, number> = { "5m": 288, "15m": 192, "60m": 120 }; // 含み損を見る期間(約1日・2日・5日)
@@ -119,6 +120,7 @@ export function techAt(bars: IBar[], i: number, tf: Tf, profile?: VolProfile, el
     atrRatio: atr / (atr50[i] || atr),
     bbWidthPct, squeezeRelease,
     obvSlope: Math.max(-1, Math.min(1, (obvs[obvs.length - 1] - obvs[0]) / vol20)),
+    atr,
   };
 }
 
@@ -130,7 +132,46 @@ export interface Judge {
   verdict: "capitulation" | "reversal" | "breakout" | "undecided";
   reasons: string[];
   tech: Tech;
+  learned?: number; // 学習モデルの混ぜ具合(0..1)
 }
+
+// ---- 学習(src/judge-learn.ts で当たりはずれから推定し、ここで使う) ----
+
+/** 判定の特徴量(向き dir にそろえる。+ は「その向きに行き過ぎ・強い」) */
+export const FEATURE_NAMES = ["出来高(log)", "値幅", "含み損の出来高", "EMA乖離", "連続足", "戻しヒゲ", "引けの位置", "RSI", "ダイバージェンス", "ATR拡大", "バンド幅", "スクイーズ放れ", "OBV"] as const;
+export function featureVec(t: Tech, dir: "down" | "up"): number[] {
+  const dn = dir === "down";
+  return [
+    Math.log(Math.max(0.1, t.volRatio)),
+    Math.min(5, t.rangeRatio) - 1,
+    (dn ? t.underwaterLong : t.underwaterShort) - 0.5,
+    Math.max(-3, Math.min(3, (dn ? -t.stretch : t.stretch) / 2)),
+    Math.min(10, dn ? t.consecDown : t.consecUp) / 8,
+    dn ? t.lowerWick : t.upperWick,
+    (dn ? 1 - t.closePos : t.closePos) - 0.5,
+    (dn ? 50 - t.rsi : t.rsi - 50) / 50,
+    (dn && t.divergence === "bull") || (!dn && t.divergence === "bear") ? 1 : 0,
+    Math.min(2, t.atrRatio) - 1,
+    t.bbWidthPct / 100 - 0.5,
+    t.squeezeRelease === dir ? 1 : 0,
+    dn ? -t.obvSlope : t.obvSlope,
+  ];
+}
+export interface JudgeModel {
+  n: number; // 学習に使った件数
+  wRev: number[]; wCon: number[]; // ロジスティック回帰の重み(先頭が切片)
+  adj: { climax: number; confirm: number; break: number }; // 通知の厳しさの上乗せ(当たりが悪いほど大きい)
+  stats: Record<string, { n: number; hit: number }>; // 種類別の直近の当たり
+  base: { rev: number; con: number; none: number }; // 全体の結果の割合
+  updatedAt: number;
+}
+export const LEARN_MIN_N = 40;
+export const learnWeight = (n: number) => Math.min(0.7, n / (n + 200));
+const sigmoid = (z: number) => 1 / (1 + Math.exp(-z));
+export const prob = (w: number[], x: number[]) => sigmoid(w[0] + x.reduce((s, xi, i) => s + xi * (w[i + 1] ?? 0), 0));
+let learned: JudgeModel | null = null;
+export function setJudgeModel(m: JudgeModel | null) { learned = m; }
+export const judgeAdj = () => learned?.adj ?? { climax: 0, confirm: 0, break: 0 };
 
 /** 向き dir の動きについて、投げ・反転・継続の点数をつける */
 export function judgeAt(bars: IBar[], i: number, tf: Tf, dir: "down" | "up", profile?: VolProfile, elapsed = 1): Judge | null {
@@ -177,11 +218,21 @@ export function judgeAt(bars: IBar[], i: number, tf: Tf, dir: "down" | "up", pro
   const continuation = conParts.reduce((s, [w, v]) => s + w * v, 0);
   for (const [w, v, label] of conParts) if (w * v >= w * 0.6) reasons.push(`継続: ${label}`);
 
+  // 学習済みモデル(実際の値動きで当たりはずれを学習)があれば、手作りの点数と混ぜる
+  let revS = reversal, conS = continuation;
+  const m = learned;
+  if (m && m.n >= LEARN_MIN_N) {
+    const x = featureVec(t, dir);
+    const a = learnWeight(m.n);
+    revS = (1 - a) * reversal + a * 100 * prob(m.wRev, x);
+    conS = (1 - a) * continuation + a * 100 * prob(m.wCon, x);
+  }
+  const reversal2 = revS, continuation2 = conS;
   let verdict: Judge["verdict"] = "undecided";
-  if (capitulation >= 60 && reversal >= continuation) verdict = "capitulation";
-  else if (reversal >= 50 && reversal >= continuation + 15) verdict = "reversal";
-  else if (continuation >= 60 && continuation >= reversal + 15) verdict = "breakout";
-  return { dir, capitulation: Math.round(capitulation), reversal: Math.round(reversal), continuation: Math.round(continuation), verdict, reasons, tech: t };
+  if (capitulation >= 60 && reversal2 >= continuation2) verdict = "capitulation";
+  else if (reversal2 >= 50 && reversal2 >= continuation2 + 15) verdict = "reversal";
+  else if (continuation2 >= 60 && continuation2 >= reversal2 + 15) verdict = "breakout";
+  return { dir, capitulation: Math.round(capitulation), reversal: Math.round(reversal2), continuation: Math.round(continuation2), verdict, reasons, tech: t, learned: m && m.n >= LEARN_MIN_N ? learnWeight(m.n) : 0 };
 }
 
 /** 売り圧・買い圧のたまり具合: バンド収縮(エネルギー)× OBV の向き、含み損の滞留 */

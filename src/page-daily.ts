@@ -1,3 +1,4 @@
+import { LEARN_MIN_N, learnWeight, type JudgeModel } from "./technicals";
 import type { DailyAnalysis, DailyStrike } from "./daily";
 import type { AlertLogItem } from "./alerts";
 import type { ViPoint } from "./vi";
@@ -367,6 +368,21 @@ function viSection(a: DailyAnalysis, hist: ViPoint[]): string {
     <p class="muted small">日経VIは、日経225オプションの価格から計算される「今後1か月の日経平均の予想変動率(年率%)」で、市場の恐怖の度合いを表します。20前後が平常、30を超えると警戒、40を超えるとパニック的な局面です。VIが急上昇した後のピークは、相場の底と重なることが多い一方、上昇が続く間は下げが加速しやすくなります。50日平均からの乖離と前日比を予測モデルの材料に加え、効き方は毎日の自動見直しで判断しています。データは日経公式(日次)。</p>`;
 }
 
+/** テクニカル判定の答え合わせと自動調整の状況 */
+function learnSection(m: JudgeModel | null): string {
+  const pct = (h: { n: number; hit: number } | undefined) => (h && h.n ? `${Math.round((h.hit / h.n) * 100)}%(${h.hit}/${h.n}件)` : "まだなし");
+  const when = m ? new Date(m.updatedAt + 9 * 3600e3).toISOString().replace("T", " ").slice(5, 16) : "";
+  const body = m ? `<div class="table-wrap"><table class="small"><thead><tr><th>種類</th><th>直近30件の当たり率</th><th>通知の厳しさの上乗せ</th></tr></thead><tbody>
+    <tr><td>天井・大底候補(当たり = 反転)</td><td>${pct(m.stats.climax)}</td><td>投げ度の基準 40 → ${40 + m.adj.climax}</td></tr>
+    <tr><td>大底・天井確認(当たり = 反転)</td><td>${pct(m.stats.confirm)}</td><td>反転 ≥ 継続 ${m.adj.confirm ? `+ ${m.adj.confirm}` : ""}</td></tr>
+    <tr><td>ブレイク(当たり = 継続)</td><td>${pct(m.stats.break)}</td><td>継続の基準 +${m.adj.break}</td></tr>
+    <tr><td class="muted">参考: 全クライマックス足(損益分岐から遠いものも)</td><td>${pct(m.stats.climaxAll)}</td><td class="muted">学習用</td></tr>
+    </tbody></table></div>
+    <p class="muted small">学習件数 ${m.n} 件(反転 ${Math.round(m.base.rev * 100)}%・継続 ${Math.round(m.base.con * 100)}%・どちらでもない ${Math.round(m.base.none * 100)}%)。${m.n >= LEARN_MIN_N ? `点数のうち 学習モデル ${Math.round(learnWeight(m.n) * 100)}%・手作りの点数 ${100 - Math.round(learnWeight(m.n) * 100)}% で判定中` : `${LEARN_MIN_N} 件たまるまでは手作りの点数だけで判定`}。最終更新 ${when} JST</p>` : `<p class="muted small">まだ答え合わせのデータがありません。</p>`;
+  return `<h4>判定の答え合わせと自動調整</h4>${body}
+    <p class="muted small">判定した足のその後(5分足は1時間・15分足は2時間・60分足は6時間以内)に、その足の終値から ATR(平均値幅)1本分、どちら向きに先に動いたかで答え合わせをしています。15分ごとに、分足に出たすべてのクライマックス足と、実際に通知した足を記録・採点し、(1) 反転・継続の確率モデルを学習して点数に混ぜ(件数が増えるほど比重を上げ、最大70%)、(2) 種類ごとの当たり率が55%を下回るほど通知の条件を厳しくします(5点刻み、最大+20。55%以上なら元の基準に戻す)。</p>`;
+}
+
 /** 最近のアラート */
 function alertsSection(log: AlertLogItem[]): string {
   const items = [...log].slice(-15).reverse();
@@ -381,7 +397,7 @@ function alertsSection(log: AlertLogItem[]): string {
   return `<h4>最近のアラート</h4>${rows ? `<div class="table-wrap"><table><thead><tr><th>時刻(JST)</th><th>種類</th><th>時間足</th><th>内容</th><th>メール</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<p class="muted small">まだアラートはありません。大底・天井候補(出来高を伴う急落・急騰 × 売り手の損益分岐)と、ファーOTM のプット・コールの急騰・急落(前日比 2倍以上/0.5倍以下)が出るとここに載り、メールで通知します。</p>`}`;
 }
 
-export function renderDailySection(a: DailyAnalysis | undefined, history: DailyAnalysis[], strikes: DailyStrike[], squeezeHist: SqueezeHist[] = [], alertLog: AlertLogItem[] = [], viHist: ViPoint[] = []): string {
+export function renderDailySection(a: DailyAnalysis | undefined, history: DailyAnalysis[], strikes: DailyStrike[], squeezeHist: SqueezeHist[] = [], alertLog: AlertLogItem[] = [], viHist: ViPoint[] = [], judgeModel: JudgeModel | null = null): string {
   if (!a) return "";
   const m = `${a.front.month.slice(0, 4)}年${Number(a.front.month.slice(4))}月限`;
   const dPcr = a.prev ? a.pcr - a.prev.pcr : null;
@@ -403,6 +419,7 @@ export function renderDailySection(a: DailyAnalysis | undefined, history: DailyA
     <p class="comment">${esc(a.comment)}</p>
     ${intradaySection(a)}
     ${alertsSection(alertLog)}
+    ${learnSection(judgeModel)}
     ${viSection(a, viHist)}
     <h4>行使価格別 建玉(${esc(m)}, 500円刻み)</h4>
     ${oiChart(a, strikes)}

@@ -12,7 +12,7 @@
  *   損益分岐(先物換算 = 日経平均ベースの損益分岐 + ベーシス)との距離 ≤ LEVEL_PCT、または足がその水準をまたいだ
  */
 import type { DailyAnalysis, DailyStrike } from "./daily";
-import { judgeAt, judgeText, tierOf, type Judge } from "./technicals";
+import { judgeAdj, judgeAt, judgeText, tierOf, type Judge } from "./technicals";
 
 export const TIMEFRAMES = [
   { tf: "5m", label: "5分足", range: "2d" },
@@ -184,7 +184,7 @@ ${siteUrl}
   return { subject, text };
 }
 
-export interface AlertState { lastSent: Record<string, number>; pending?: Pending[]; lastRun?: { at: number; ok: boolean; note: string; checked: Record<string, { t: number; close: number; volRatio: number } | null> } }
+export interface AlertState { lastSent: Record<string, number>; pending?: Pending[]; lastLearn?: number; learnDirty?: boolean; lastRun?: { at: number; ok: boolean; note: string; checked: Record<string, { t: number; close: number; volRatio: number } | null> } }
 export interface AlertLogItem { at: number; tf: Tf | "daily"; side: Signal["side"] | "far-up" | "far-down" | FollowSignal["kind"]; close: number; level: number; volRatio: number; sent: boolean; text?: string }
 
 /** 期間内のすべての足についてクライマックス判定(チャートのマーカー用)。level に近いものは near=true */
@@ -312,10 +312,11 @@ export function followUp(p: Pending, bars: IBar[], now = Date.now(), profile?: V
     if (bottom ? b.low < p.low * (1 - NEW_EXTREME_TOL) : b.high > p.high * (1 + NEW_EXTREME_TOL)) newExtreme = true;
     const beyond = bottom ? b.close < p.low : b.close > p.high;
     if (beyond) { beyondCount++; if (volRatio >= BREAK_VOL) beyondVol = true; } else beyondCount = 0;
-    const strongCont = !!j && j.continuation >= 60 && j.continuation >= j.reversal + 10;
+    const adj = judgeAdj(); // 当たりが悪い種類ほど厳しく(src/judge-learn.ts)
+    const strongCont = !!j && j.continuation >= 60 + adj.break && j.continuation >= j.reversal + 10;
     if (beyond && ((beyondCount >= 2 && beyondVol) || (volRatio >= BREAK_VOL && strongCont))) return { signal: mk(bottom ? "break-down" : "break-up"), expired: false };
     const back = bottom ? b.close > mid : b.close < mid;
-    if (back && !newExtreme && (!j || j.reversal >= j.continuation)) return { signal: mk(bottom ? "confirm-bottom" : "confirm-top"), expired: false };
+    if (back && !newExtreme && (!j || j.reversal >= j.continuation + adj.confirm)) return { signal: mk(bottom ? "confirm-bottom" : "confirm-top"), expired: false };
   }
   return { signal: null, expired: after.length >= FOLLOW_BARS[p.tf] };
 }
@@ -342,7 +343,7 @@ export function detectLevelBreak(tf: Tf, label: string, bars: IBar[], lv: Levels
     const out = dir === "down" ? b.close < level * (1 - BREAK_MARGIN) && b1.close < level : b.close > level * (1 + BREAK_MARGIN) && b1.close > level;
     if (!out || !recent.some((r) => (dir === "down" ? r.close > level : r.close < level))) return null;
     const j = judgeAt(done, idx, tf, dir, profile);
-    if (j && (j.continuation < LEVEL_BREAK_CONT || j.continuation <= j.reversal)) return null;
+    if (j && (j.continuation < LEVEL_BREAK_CONT + judgeAdj().break || j.continuation <= j.reversal)) return null;
     return { kind: dir === "down" ? "level-break-down" : "level-break-up", tf, label, bar: b, level, volRatio, judge: j };
   };
   return (lv.putLevel != null ? check("down", lv.putLevel) : null) ?? (lv.callLevel != null ? check("up", lv.callLevel) : null);

@@ -75,3 +75,17 @@ describe("trend-aware gate", () => {
     expect(j2.reversal).toBeGreaterThan(j.reversal);
   });
 });
+
+describe("context gates", () => {
+  it("blocks a top when the 60m trend is up and not overheated, or when beyond the call breakeven on a first climax", async () => {
+    const { reversalOk } = await import("../src/technicals");
+    const bars: B[] = []; let px = 60000, t = 1_700_000_000;
+    for (let i = 0; i < 60; i++) { const c = px + (i % 2 ? 20 : -20); bars.push({ t, open: px, high: c + 10, low: c - 10, close: c, volume: 1000 }); t += 300; }
+    const o = bars[59].close; bars.push({ t, open: o, high: o + 600, low: o - 5, close: o + 100, volume: 6000 }); // 長い上ヒゲ
+    const j = judgeAt(bars, bars.length - 1, "5m", "up")!;
+    const htfUp = { ...j.tech, trend: 2, rsi: 60, divergence: null };
+    expect(reversalOk(j, 0, { htf: htfUp }).ok).toBe(false);
+    expect(reversalOk(j, 0, { htf: { ...htfUp, rsi: 78 } }).why).not.toContain("60分足");
+    expect(reversalOk(j, 0, { beyond: true }).ok).toBe(false);
+  });
+});

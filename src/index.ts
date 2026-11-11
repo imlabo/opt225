@@ -1,4 +1,4 @@
-import { judgeAt, energyAt, VERDICT_LABEL, setJudgeModel, judgeAdj, reversalOk, type JudgeModel } from "./technicals";
+import { judgeAt, energyAt, techAt, VERDICT_LABEL, setJudgeModel, judgeAdj, reversalOk, type JudgeModel } from "./technicals";
 import { collectAndResolve, fitJudgeModel, watchFrom, LEARN_EVERY_MS, MAX_SAMPLES, REFIT_MS, current, outcome, type Watch, type Sample } from "./judge-learn";
 import { Hono } from "hono";
 import { analyze } from "./analysis";
@@ -240,15 +240,22 @@ ${env.SITE_URL}`);
   if (model && (model as { v?: number }).v !== 4) { model = null; setJudgeModel(null); } // 定義を変えたので学習し直す
   let newSamples = 0;
   const checked: NonNullable<AlertState["lastRun"]>["checked"] = {};
+  let htf: ReturnType<typeof techAt> = null;
   const signals: Signal[] = [];
   const follows: FollowSignal[] = [];
   let pending = state.pending ?? [];
   let note = "";
   if (!lv) note = "no daily analysis";
   else {
-    for (const { tf, label, range } of TIMEFRAMES) {
+    // 上位足(60分足)の流れを先に見ておく(5分足・15分足の天井・大底判定に使う)
+    const srcs = new Map<Tf, Awaited<ReturnType<typeof getBars>>>();
+    for (const { tf, range } of [...TIMEFRAMES].reverse()) { try { srcs.set(tf, await getBars(env, tf, range)); } catch (e) { note += `${tf}: ${String(e).slice(0, 80)}; `; } }
+    const h = srcs.get("60m");
+    if (h) { const d60 = h.bars.filter((b) => b.volume > 0); htf = techAt(d60, d60.length - 1, "60m", h.profile); }
+    for (const { tf, label } of TIMEFRAMES) {
       try {
-        const src = await getBars(env, tf, range);
+        const src = srcs.get(tf);
+        if (!src) { checked[tf] = null; continue; }
         const lab = src.source === "mt5" ? `${label}(MT5)` : label;
         const lvx = shiftLevels(lv, src.offset);
         const d = detect(tf, lab, src.bars, lvx, Date.now(), src.profile);
@@ -280,6 +287,17 @@ ${env.SITE_URL}`);
       } catch (e) { note += `${tf}: ${String(e).slice(0, 80)}; `; checked[tf] = null; }
     }
   }
+  // 大底・天井確認も、上位足(60分足)が元の動きの向きにトレンド中で過熱していなければ見送る(押し目・戻りの途中のことが多い)
+  if (htf) {
+    const h = htf;
+    for (let k = follows.length - 1; k >= 0; k--) {
+      const f = follows[k];
+      if (f.tf === "60m" || !f.kind.startsWith("confirm")) continue;
+      const dn = f.kind === "confirm-bottom";
+      const hTrend = dn ? -h.trend : h.trend, hHot = dn ? h.rsi <= 30 : h.rsi >= 70;
+      if (hTrend >= 1 && !hHot) follows.splice(k, 1);
+    }
+  }
   state.pending = pending.slice(-30);
   if (learnNow) {
     state.lastLearn = Date.now();
@@ -300,7 +318,8 @@ ${env.SITE_URL}`);
   // しきい値は 40 + 当たり率に応じた上乗せ(当たりが悪いほど厳しく)
   const capMin = 40 + judgeAdj().climax;
   // 天井・大底は「反転の決め手」があり、反転が継続を上回るときだけ(流れに乗ったブレイクの初動は送らない)
-  const whyNot = (s: Signal) => (!s.judge ? "" : s.judge.capitulation < capMin ? `投げ度 ${s.judge.capitulation}(基準 ${capMin} 未満)` : reversalOk(s.judge, judgeAdj().climax).why);
+  const whyNot = (s: Signal) => (!s.judge ? "" : s.judge.capitulation < capMin ? `投げ度 ${s.judge.capitulation}(基準 ${capMin} 未満)`
+    : reversalOk(s.judge, judgeAdj().climax, { beyond: !!s.beyond || (s.side === "top" ? s.bar.close > s.level : s.bar.close < s.level), htf: s.tf === "60m" ? null : htf }).why);
   const isWeak = (s: Signal) => !!whyNot(s);
   const weak = signals.filter((s) => isWeak(s) && !opts.force);
   const fresh = signals.filter((s) => (opts.force || !isWeak(s)) && (opts.force || (now - (state.lastSent[`${s.tf}:${s.side}`] ?? 0) > COOLDOWN_BY_TF[s.tf] * 60 * 1000 && !state.lastSent[`${s.tf}:${s.side}:${s.bar.t}`])));
@@ -312,6 +331,9 @@ ${env.SITE_URL}`);
   }
   let sent: boolean | undefined, mail: unknown;
   if (fresh.length && send && lv) {
+    // 送信前に「送った」と記録して保存(途中で処理が打ち切られても、毎分同じメールが届かないように)
+    for (const s of fresh) { state.lastSent[`${s.tf}:${s.side}`] = now; state.lastSent[`${s.tf}:${s.side}:${s.bar.t}`] = now; }
+    await saveMeta(env, "alert_state", state);
     if (!env.RESEND_API_KEY || !env.ALERT_TO) { note += "RESEND_API_KEY/ALERT_TO not set; "; sent = false; }
     else {
       const m = composeMail(fresh, lv, env.SITE_URL);
@@ -329,6 +351,8 @@ ${env.SITE_URL}`);
   // ブレイク・反転確認(同じ時間足・種類は時間足ごとの間隔をあけ、同じ足は一度だけ)
   const freshF = follows.filter((s) => opts.force || (now - (state.lastSent[`${s.tf}:${s.kind}`] ?? 0) > COOLDOWN_BY_TF[s.tf] * 60 * 1000 && !state.lastSent[`${s.tf}:${s.kind}:${s.bar.t}`]));
   if (freshF.length && send && lv) {
+    for (const s of freshF) { state.lastSent[`${s.tf}:${s.kind}`] = now; state.lastSent[`${s.tf}:${s.kind}:${s.bar.t}`] = now; }
+    await saveMeta(env, "alert_state", state);
     let ok = false;
     if (env.RESEND_API_KEY && env.ALERT_TO) {
       const m = composeFollowMail(freshF, lv, env.SITE_URL);
@@ -366,11 +390,16 @@ app.get("/api/judge/backtest", async (c) => {
   const base = levelsFrom(dl);
   const lv = base && shiftLevels(base, src.offset);
   const done = src.bars.filter((b) => b.volume > 0);
+  const h60 = tf.tf === "60m" ? [] : (await getBars(c.env, "60m", "1mo")).bars.filter((b) => b.volume > 0);
   const rows = scanClimax(done, lv, tf.tf, src.profile).map((x) => {
     const i = done.findIndex((b) => b.t === x.t);
     const j = judgeAt(done, i, tf.tf, x.side === "bottom" ? "down" : "up", src.profile);
     const y = j ? outcome(done, i, j.dir, tf.tf, done[i].close, j.tech.atr) : null; // 極値はその足の高値・安値
-    const gate = j ? (j.capitulation < 40 ? `投げ度${j.capitulation}` : reversalOk(j).why) : "no data";
+    const lvl = x.side === "top" ? lv?.callLevel : lv?.putLevel;
+    const beyond = lvl != null && (x.side === "top" ? done[i].close > lvl : done[i].close < lvl);
+    const hb = h60.filter((b) => b.t <= done[i].t);
+    const htf = tf.tf === "60m" || hb.length < 31 ? null : techAt(hb, hb.length - 1, "60m");
+    const gate = j ? (j.capitulation < 40 ? `投げ度${j.capitulation}` : reversalOk(j, 0, { beyond, htf }).why) : "no data";
     return { t: x.t, side: x.side, near: x.near, close: done[i].close, cap: j?.capitulation, rev: j?.reversal, con: j?.continuation, send: !gate, why: gate, y };
   });
   const sum = (xs: typeof rows) => ({ n: xs.length, rev: xs.filter((r) => r.y === "rev").length, con: xs.filter((r) => r.y === "con").length, none: xs.filter((r) => r.y === "none").length, open: xs.filter((r) => r.y == null).length });

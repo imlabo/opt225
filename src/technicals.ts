@@ -11,7 +11,7 @@
  *  - ATR の拡大(14本 / 50本)、ボリンジャーバンド幅の収縮(スクイーズ)からのバンド外への放れ
  *  - OBV(出来高を伴う方向)の傾き
  */
-import { baseVolume, LOOKBACK, type IBar, type Tf, type VolProfile } from "./alerts";
+import { LOOKBACK, slotOf, type IBar, type Tf, type VolProfile } from "./alerts";
 
 const clip01 = (x: number) => Math.max(0, Math.min(1, x));
 const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
@@ -63,68 +63,101 @@ export interface Tech {
 const UW_BARS: Record<Tf, number> = { "5m": 288, "15m": 192, "60m": 120 }; // 含み損を見る期間(約1日・2日・5日)
 const TREND_EMA: Record<Tf, number> = { "5m": 144, "15m": 96, "60m": 50 }; // 大きな流れを見る長期EMA(約12時間・1日・2日)
 
+/**
+ * 足の配列ごとに一度だけ計算する系列(EMA・ATR・RSI・ボリンジャー・クライマックス足の印)。
+ * Worker の CPU 制限(1 回 10ms 程度)に収めるため、同じ配列で何度も判定するときは使い回す
+ */
+interface Series { sig: string; tf: Tf; profile?: VolProfile; e20: number[]; eLong: number[]; atr14: number[]; atr50: number[]; rsi: number[]; bbM: number[]; bbSd: number[]; bbW: number[]; climax: Int8Array; base: number[]; avgRange: number[] }
+const seriesCache = new WeakMap<IBar[], Series>();
+function seriesOf(bars: IBar[], tf: Tf, profile?: VolProfile): Series {
+  const last = bars[bars.length - 1];
+  const sig = `${bars.length}:${last?.t}:${last?.close}:${last?.volume}:${last?.high}:${last?.low}`;
+  const c = seriesCache.get(bars);
+  if (c && c.sig === sig && c.tf === tf && c.profile === profile) return c;
+  const close = bars.map((x) => x.close);
+  const n = bars.length;
+  const bbM: number[] = new Array(n).fill(0), bbSd: number[] = new Array(n).fill(0), bbW: number[] = new Array(n).fill(0);
+  let s1 = 0, s2 = 0;
+  for (let k = 0; k < n; k++) {
+    s1 += close[k]; s2 += close[k] * close[k];
+    if (k >= 20) { s1 -= close[k - 20]; s2 -= close[k - 20] * close[k - 20]; }
+    const cnt = Math.min(20, k + 1), m = s1 / cnt, sd = Math.sqrt(Math.max(0, s2 / cnt - m * m));
+    bbM[k] = m; bbSd[k] = sd; bbW[k] = m ? (4 * sd) / m : 0;
+  }
+  const base: number[] = new Array(n).fill(0), avgRange: number[] = new Array(n).fill(0);
+  const climax = new Int8Array(n);
+  let vSum = 0, rSum = 0;
+  for (let k = 0; k < n; k++) {
+    if (k > 0) { vSum += bars[k - 1].volume; rSum += bars[k - 1].high - bars[k - 1].low; }
+    if (k > LOOKBACK) { vSum -= bars[k - 1 - LOOKBACK].volume; rSum -= bars[k - 1 - LOOKBACK].high - bars[k - 1 - LOOKBACK].low; }
+    const cnt = Math.min(LOOKBACK, k);
+    if (!cnt) continue;
+    const avg = vSum / cnt;
+    const slot = profile?.[slotOf(bars[k].t, tf)];
+    base[k] = slot && slot > avg ? slot : avg;
+    avgRange[k] = rSum / cnt;
+    const x = bars[k];
+    if (k >= LOOKBACK && base[k] > 0 && avgRange[k] > 0 && x.volume >= 2 * base[k] && x.high - x.low >= 1.5 * avgRange[k]) {
+      const pos = (x.close - x.low) / (x.high - x.low || 1);
+      climax[k] = x.close > x.open && pos >= 0.66 ? 1 : x.close < x.open && pos <= 0.34 ? -1 : 0;
+    }
+  }
+  const out: Series = { sig, tf, profile, e20: ema(close, 20), eLong: ema(close, TREND_EMA[tf]), atr14: atrSeries(bars, 14), atr50: atrSeries(bars, 50), rsi: rsiSeries(close), bbM, bbSd, bbW, climax, base, avgRange };
+  seriesCache.set(bars, out);
+  return out;
+}
+
 export function techAt(bars: IBar[], i: number, tf: Tf, profile?: VolProfile, elapsed = 1): Tech | null {
   if (i < 30) return null;
+  const S = seriesOf(bars, tf, profile);
   const b = bars[i];
-  const close = bars.map((x) => x.close);
-  const e20 = ema(close.slice(0, i + 1), 20)[i];
-  const atr14 = atrSeries(bars.slice(0, i + 1), 14), atr50 = atrSeries(bars.slice(0, i + 1), 50);
-  const atr = atr14[i] || 1;
-  const prev = bars.slice(Math.max(0, i - LOOKBACK), i);
-  const base = baseVolume(prev, b, tf, profile) || 1;
-  const avgRange = mean(prev.map((x) => x.high - x.low)) || 1;
+  const e20 = S.e20[i];
+  const atr = S.atr14[i] || 1;
+  const base = S.base[i] || 1;
+  const avgRange = S.avgRange[i] || 1;
   const range = b.high - b.low || 1;
-  // 含み損の滞留(出来高を各足の終値に置く近似)
-  const w = bars.slice(Math.max(0, i - UW_BARS[tf]), i);
-  const vAll = w.reduce((s, x) => s + x.volume, 0) || 1;
-  const vAbove = w.filter((x) => x.close > b.close).reduce((s, x) => s + x.volume, 0);
-  const vBelow = w.filter((x) => x.close < b.close).reduce((s, x) => s + x.volume, 0);
+  // 含み損の滞留(出来高を各足の終値に置く近似)と、直近の高値・安値、同じ向きのクライマックス回数
+  const w0 = Math.max(0, i - UW_BARS[tf]);
+  let vAll = 0, vAbove = 0, vBelow = 0, hiW = -Infinity, loW = Infinity, priorUp = 0, priorDown = 0;
+  for (let k = w0; k < i; k++) {
+    const x = bars[k];
+    vAll += x.volume;
+    if (x.close > b.close) vAbove += x.volume; else if (x.close < b.close) vBelow += x.volume;
+    if (x.high > hiW) hiW = x.high;
+    if (x.low < loW) loW = x.low;
+    if (k < i - 1) { if (S.climax[k] === 1) priorUp++; else if (S.climax[k] === -1) priorDown++; }
+  }
+  vAll = vAll || 1;
+  if (hiW === -Infinity) { hiW = b.high; loW = b.low; }
   let cd = 0, cu = 0;
   for (let k = i; k >= 0 && bars[k].close < bars[k].open; k--) cd++;
   for (let k = i; k >= 0 && bars[k].close > bars[k].open; k--) cu++;
-  const rsi = rsiSeries(close.slice(0, i + 1));
+  const rsi = S.rsi;
   // ダイバージェンス: 直近 5 本の安値(高値)が、その前 6〜30 本の安値(高値)を更新し、RSI は前の谷(山)より上(下)
-  const recent = bars.slice(i - 4, i + 1), earlier = bars.slice(Math.max(0, i - 30), i - 5);
-  const rIdxLow = i - 4 + recent.reduce((m, x, k) => (x.low < recent[m].low ? k : m), 0);
-  const eIdxLow = Math.max(0, i - 30) + earlier.reduce((m, x, k) => (x.low < earlier[m].low ? k : m), 0);
-  const rIdxHigh = i - 4 + recent.reduce((m, x, k) => (x.high > recent[m].high ? k : m), 0);
-  const eIdxHigh = Math.max(0, i - 30) + earlier.reduce((m, x, k) => (x.high > earlier[m].high ? k : m), 0);
+  let rL = i - 4, rH = i - 4, eL = Math.max(0, i - 30), eH = eL;
+  for (let k = i - 4; k <= i; k++) { if (bars[k].low < bars[rL].low) rL = k; if (bars[k].high > bars[rH].high) rH = k; }
+  const eEnd = i - 5;
+  for (let k = eL; k < eEnd; k++) { if (bars[k].low < bars[eL].low) eL = k; if (bars[k].high > bars[eH].high) eH = k; }
   let divergence: Tech["divergence"] = null;
-  if (earlier.length && bars[rIdxLow].low < bars[eIdxLow].low && rsi[rIdxLow] > rsi[eIdxLow] + 3) divergence = "bull";
-  else if (earlier.length && bars[rIdxHigh].high > bars[eIdxHigh].high && rsi[rIdxHigh] < rsi[eIdxHigh] - 3) divergence = "bear";
-  // ボリンジャーバンド幅
-  const bw = (k: number) => {
-    const s = close.slice(Math.max(0, k - 19), k + 1);
-    const m = mean(s), sd = Math.sqrt(mean(s.map((x) => (x - m) ** 2)));
-    return { m, sd, width: m ? (4 * sd) / m : 0 };
-  };
-  const widths: number[] = [];
-  for (let k = Math.max(20, i - 100); k <= i; k++) widths.push(bw(k).width);
-  const cur = bw(i);
-  const bbWidthPct = widths.length ? (widths.filter((x) => x < cur.width).length / widths.length) * 100 : 50;
-  const prevPct = (() => {
-    const pw = widths.slice(-6, -1);
-    if (!pw.length) return 50;
-    const m = Math.min(...pw);
-    return (widths.filter((x) => x < m).length / widths.length) * 100;
-  })();
-  const squeezeRelease: Tech["squeezeRelease"] = prevPct <= 20 ? (b.close < cur.m - 2 * cur.sd ? "down" : b.close > cur.m + 2 * cur.sd ? "up" : null) : null;
-  // OBV の傾き
-  let obv = 0; const obvs: number[] = [];
-  for (let k = Math.max(1, i - 20); k <= i; k++) { obv += Math.sign(bars[k].close - bars[k - 1].close) * bars[k].volume; obvs.push(obv); }
-  const vol20 = bars.slice(Math.max(0, i - 20), i + 1).reduce((s, x) => s + x.volume, 0) || 1;
-  // 大きな流れ(長期EMA との差)と、高値・安値の更新、同じ向きのクライマックスの回数
-  const eLong = ema(close.slice(0, i + 1), TREND_EMA[tf])[i];
-  const hiW = w.length ? Math.max(...w.map((x) => x.high)) : b.high, loW = w.length ? Math.min(...w.map((x) => x.low)) : b.low;
-  let priorUp = 0, priorDown = 0;
-  for (let k = Math.max(LOOKBACK, i - UW_BARS[tf]); k < i - 1; k++) {
-    const x = bars[k], pv = bars.slice(k - LOOKBACK, k);
-    const bv = baseVolume(pv, x, tf, profile), ar = mean(pv.map((y) => y.high - y.low));
-    if (!(bv > 0) || !(ar > 0) || x.volume < 2 * bv || x.high - x.low < 1.5 * ar) continue;
-    const pos = (x.close - x.low) / (x.high - x.low || 1);
-    if (x.close > x.open && pos >= 0.66) priorUp++;
-    else if (x.close < x.open && pos <= 0.34) priorDown++;
+  if (eEnd > Math.max(0, i - 30)) {
+    if (bars[rL].low < bars[eL].low && rsi[rL] > rsi[eL] + 3) divergence = "bull";
+    else if (bars[rH].high > bars[eH].high && rsi[rH] < rsi[eH] - 3) divergence = "bear";
   }
+  // ボリンジャーバンド幅の、直近 100 本での位置
+  const k0 = Math.max(20, i - 100);
+  const cnt = i - k0 + 1;
+  let below = 0, prevMin = Infinity;
+  for (let k = k0; k <= i; k++) { if (S.bbW[k] < S.bbW[i]) below++; if (k >= i - 5 && k < i && S.bbW[k] < prevMin) prevMin = S.bbW[k]; }
+  const bbWidthPct = cnt > 0 ? (below / cnt) * 100 : 50;
+  let belowPrev = 0;
+  if (prevMin !== Infinity) for (let k = k0; k <= i; k++) if (S.bbW[k] < prevMin) belowPrev++;
+  const prevPct = prevMin === Infinity ? 50 : (belowPrev / cnt) * 100;
+  const m = S.bbM[i], sd = S.bbSd[i];
+  const squeezeRelease: Tech["squeezeRelease"] = prevPct <= 20 ? (b.close < m - 2 * sd ? "down" : b.close > m + 2 * sd ? "up" : null) : null;
+  // OBV の傾き
+  let obv = 0, vol20 = bars[Math.max(0, i - 20)].volume;
+  for (let k = Math.max(1, i - 20); k <= i; k++) { obv += Math.sign(bars[k].close - bars[k - 1].close) * bars[k].volume; if (k > Math.max(0, i - 20)) vol20 += bars[k].volume; }
+  const firstObv = Math.sign(bars[Math.max(1, i - 20)].close - bars[Math.max(1, i - 20) - 1].close) * bars[Math.max(1, i - 20)].volume;
   return {
     volRatio: b.volume / (base * elapsed), rangeRatio: range / (avgRange * Math.sqrt(elapsed)),
     underwaterLong: vAbove / vAll, underwaterShort: vBelow / vAll,
@@ -133,11 +166,11 @@ export function techAt(bars: IBar[], i: number, tf: Tf, profile?: VolProfile, el
     lowerWick: (Math.min(b.open, b.close) - b.low) / range, upperWick: (b.high - Math.max(b.open, b.close)) / range,
     closePos: (b.close - b.low) / range,
     rsi: rsi[i], divergence,
-    atrRatio: atr / (atr50[i] || atr),
+    atrRatio: atr / (S.atr50[i] || atr),
     bbWidthPct, squeezeRelease,
-    obvSlope: Math.max(-1, Math.min(1, (obvs[obvs.length - 1] - obvs[0]) / vol20)),
+    obvSlope: Math.max(-1, Math.min(1, (obv - firstObv) / (vol20 || 1))),
     atr,
-    trend: Math.max(-6, Math.min(6, (e20 - eLong) / atr)),
+    trend: Math.max(-6, Math.min(6, (e20 - S.eLong[i]) / atr)),
     newHigh: b.high >= hiW, newLow: b.low <= loW,
     priorUp, priorDown,
   };
@@ -287,16 +320,30 @@ export const VERDICT_LABEL: Record<Judge["verdict"], string> = {
  * 決め手 = 戻しのヒゲ 30% 以上 / RSI ダイバージェンス / 2 回目以降のクライマックスで RSI が過熱
  * 大きな流れと同じ向きの、高値(安値)更新の初動は、決め手があっても継続を優先(通知しない)
  */
-export function reversalOk(j: Judge, extra = 0): { ok: boolean; why: string } {
+export interface GateCtx {
+  beyond?: boolean; // 売り手の損益分岐の外(売り手が損失圏 = ヘッジの先物買い・売りで動きが加速しやすい)
+  htf?: Tech | null; // 上位足(60分足)の最新の状態
+}
+export function reversalOk(j: Judge, extra = 0, ctx: GateCtx = {}): { ok: boolean; why: string } {
   const t = j.tech, dn = j.dir === "down";
+  // 上位足が同じ向きのトレンドで、まだ過熱していない → 下位足の天井・大底は押し目・戻りにすぎないことが多い
+  const h = ctx.htf;
+  if (h) {
+    const hTrend = dn ? -h.trend : h.trend, hHot = dn ? h.rsi <= 30 : h.rsi >= 70;
+    const hDiv = (dn && h.divergence === "bull") || (!dn && h.divergence === "bear");
+    if (hTrend >= 1 && !hHot && !hDiv) return { ok: false, why: `60分足が${dn ? "下降" : "上昇"}トレンドで過熱なし(RSI ${h.rsi.toFixed(0)})` };
+  }
   const wick = dn ? t.lowerWick : t.upperWick, prior = dn ? t.priorDown : t.priorUp;
   const div = (dn && t.divergence === "bull") || (!dn && t.divergence === "bear");
   const hot = dn ? t.rsi <= 30 : t.rsi >= 70;
   const decisive = wick >= 0.3 || div || (prior >= 1 && hot);
   const freshTrend = (dn ? t.newLow : t.newHigh) && prior === 0 && (dn ? -t.trend : t.trend) >= 1.5 && !div;
   if (freshTrend) return { ok: false, why: "流れと同じ向きの高値(安値)更新の初動(ブレイク優勢)" };
-  if (j.reversal < j.continuation + 5 + extra) return { ok: false, why: `反転 ${j.reversal} < 継続 ${j.continuation} + ${5 + extra}` };
+  // 損益分岐の外では、売り手のヘッジ(踏み上げ・投げ)で走りやすいので、より強い反転材料を求める
+  const need = 5 + extra + (ctx.beyond ? 10 : 0);
+  if (j.reversal < j.continuation + need) return { ok: false, why: `反転 ${j.reversal} < 継続 ${j.continuation} + ${need}${ctx.beyond ? "(損益分岐の外)" : ""}` };
   if (!decisive) return { ok: false, why: "反転の決め手(ヒゲ・ダイバージェンス・2回目以降の過熱)なし" };
+  if (ctx.beyond && !div && prior === 0) return { ok: false, why: "損益分岐の外で1回目のクライマックス(ダイバージェンスなし)" };
   return { ok: true, why: "" };
 }
 

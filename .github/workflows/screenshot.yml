@@ -2,6 +2,8 @@ name: Mobile screenshot
 # サイトをスマホ幅で撮影して、表示崩れを確認する(手動実行)
 on:
   workflow_dispatch:
+permissions:
+  contents: write
 jobs:
   shot:
     runs-on: ubuntu-latest
@@ -26,5 +28,8 @@ jobs:
             await p.screenshot({ path: "mobile.png", fullPage: true });
             await b.close();
           })();'
-      - uses: actions/upload-artifact@v4
-        with: { name: mobile, path: mobile.png }
+      - name: Save to screenshots branch
+        run: |
+          mkdir /tmp/s && cp mobile.png /tmp/s/ && cd /tmp/s && git init -q -b screenshots && git add mobile.png
+          git -c user.name=bot -c user.email=bot@users.noreply.github.com commit -qm "mobile screenshot"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" screenshots

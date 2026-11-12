@@ -183,9 +183,13 @@ h2{font-size:18px}h3{font-size:15px}h4{margin:16px 0 6px}
 .score{font-size:36px}.kpi{padding:8px}.kpi strong{font-size:17px}
 table{font-size:12px}th,td{padding:6px 4px}
 .contrib li{grid-template-columns:72px 1fr 48px;gap:6px}
-.svg-scroll svg,.tf-chart svg{min-width:620px}.tf-chart{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.svg-scroll svg{min-width:620px}
+svg.fg-gauge{max-width:260px;display:block;margin:0 auto}
+.tf-judge table,.tf-judge tbody{display:block}.tf-judge caption{display:block;text-align:left}
+.tf-judge tr{display:flex;flex-wrap:wrap;align-items:center;gap:2px 12px;border-bottom:1px solid var(--line);padding:6px 0}
+.tf-judge th,.tf-judge td{border:0;padding:0;text-align:left!important}.tf-judge td[colspan]{flex-basis:100%}
 .tf-tabs{flex-wrap:wrap}.tf-tabs button{padding:6px 12px;font-size:14px}
-.tf-judge td{white-space:normal}.jbar{width:36px}
+.tf-judge td{white-space:normal}.jbar{width:40px}
 .sq-g-head strong{font-size:22px}
 details.explain{padding:8px 10px;font-size:12.5px}
 .banner{font-size:13px}

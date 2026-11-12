@@ -22,7 +22,7 @@ function gauge(score: number, title: string): string {
     return `<path d="${d}" class="${b.cls}${active ? " fg-on" : ""}"/>`;
   }).join("");
   const [nx, ny] = pt(score, r - rw - 8);
-  return `<svg viewBox="0 0 300 175" role="img" aria-label="${title} ${Math.round(score)}">
+  return `<svg class="fg-gauge" viewBox="0 0 300 175" role="img" aria-label="${title} ${Math.round(score)}">
     ${arcs}<line x1="${cx}" y1="${cy}" x2="${nx}" y2="${ny}" class="fg-needle"/><circle cx="${cx}" cy="${cy}" r="6" class="fg-hub"/>
     <text x="${cx}" y="${cy + 30}" text-anchor="middle" class="fg-score">${Math.round(score)}</text>
     <text x="22" y="${cy + 18}" class="fg-end">0</text><text x="270" y="${cy + 18}" class="fg-end">100</text></svg>`;

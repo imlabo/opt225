@@ -293,12 +293,14 @@ function yen(n){return Math.round(n).toLocaleString("ja-JP")}
 function jst(t){var d=new Date(t*1000+9*3600e3);return (d.getUTCMonth()+1)+"/"+d.getUTCDate()+" "+String(d.getUTCHours()).padStart(2,"0")+":"+String(d.getUTCMinutes()).padStart(2,"0")}
 function draw(d){
   var bars=d.bars.filter(function(b){return b.volume>0||b===d.bars[d.bars.length-1]});
-  var n={"5m":120,"15m":120,"60m":150}[d.tf]||120;bars=bars.slice(-n);
+  var mob=window.innerWidth<600;
+  var n=mob?({"5m":72,"15m":72,"60m":90}[d.tf]||72):({"5m":120,"15m":120,"60m":150}[d.tf]||120);bars=bars.slice(-n);
   if(bars.length<5){el.innerHTML='<p class="muted">データがありません</p>';return}
-  var W=720,H=320,P=48,VH=60,CH=H-VH-30;
+  var W=mob?420:720,H=mob?300:320,P=mob?36:48,VH=mob?50:60,CH=H-VH-30;
   var lv=d.levels||{};var lvs=[lv.putLevel,lv.callLevel].filter(function(v){return v!=null});
   var hi=Math.max.apply(null,bars.map(function(b){return b.high})),lo=Math.min.apply(null,bars.map(function(b){return b.low}));
-  lvs.forEach(function(v){if(Math.abs(v-bars[bars.length-1].close)/bars[bars.length-1].close<0.06){hi=Math.max(hi,v);lo=Math.min(lo,v)}});
+  // 損益分岐が近い(1.5%以内)ときだけ縦軸に含める。遠いときは上端・下端に矢印で表示(ローソク足が潰れないように)
+  lvs.forEach(function(v){if(Math.abs(v-bars[bars.length-1].close)/bars[bars.length-1].close<0.015){hi=Math.max(hi,v);lo=Math.min(lo,v)}});
   var pad=(hi-lo)*0.05;hi+=pad;lo-=pad;
   var vmax=Math.max.apply(null,bars.map(function(b){return b.volume}))||1;
   var x=function(i){return P+(i+0.5)*(W-P-10)/bars.length},y=function(v){return 10+(hi-v)/(hi-lo)*CH},yv=function(v){return H-20-v/vmax*VH};
@@ -316,7 +318,10 @@ function draw(d){
   if(lv.putLevel!=null&&lv.putLevel>lo&&lv.putLevel<hi)s+='<line x1="'+P+'" x2="'+(W-10)+'" y1="'+y(lv.putLevel)+'" y2="'+y(lv.putLevel)+'" class="tf-lv"/><text x="'+(P+4)+'" y="'+(y(lv.putLevel)-3)+'" class="tf-lv-t">プット損益分岐 '+yen(lv.putLevel)+'</text>';
   if(lv.callLevel!=null&&lv.callLevel>lo&&lv.callLevel<hi)s+='<line x1="'+P+'" x2="'+(W-10)+'" y1="'+y(lv.callLevel)+'" y2="'+y(lv.callLevel)+'" class="tf-lv"/><text x="'+(P+4)+'" y="'+(y(lv.callLevel)-3)+'" class="tf-lv-t">コール損益分岐 '+yen(lv.callLevel)+'</text>';
   var last=bars[bars.length-1];s+='<text x="'+(W-12)+'" y="'+(y(last.close)+4)+'" text-anchor="end" class="tf-last">'+yen(last.close)+'</text>';
-  s+='</svg>';el.innerHTML=s;el.scrollLeft=el.scrollWidth;
+  var pc=function(v){return ((v-last.close)/last.close*100).toFixed(2)};
+  if(lv.callLevel!=null&&lv.callLevel>=hi)s+='<text x="'+(W-12)+'" y="22" text-anchor="end" class="tf-lv-t">↑ コール損益分岐 '+yen(lv.callLevel)+'(+'+pc(lv.callLevel)+'%)</text>';
+  if(lv.putLevel!=null&&lv.putLevel<=lo)s+='<text x="'+(W-12)+'" y="'+(10+CH-4)+'" text-anchor="end" class="tf-lv-t">↓ プット損益分岐 '+yen(lv.putLevel)+'('+pc(lv.putLevel)+'%)</text>';
+  s+='</svg>';el.innerHTML=s;
   st.textContent=(d.source==="mt5"?"XS MT5 "+d.symbol+"(リアルタイム) ":"CME "+d.symbol+"(Yahoo・遅延あり) ")+d.label+" 最新 "+jst(last.t)+" "+yen(last.close)+lvTxt("put",lv.putLevel,last.close)+lvTxt("call",lv.callLevel,last.close);
 }
 var VL={capitulation:"投げ→反転含み",reversal:"反転の兆し",breakout:"ブレイク優勢",undecided:"判定保留"};

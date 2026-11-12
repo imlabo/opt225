@@ -314,7 +314,7 @@ function draw(d){
     s+='<rect x="'+(x(i)-cw/2)+'" y="'+y(Math.max(b.open,b.close))+'" width="'+cw+'" height="'+Math.max(1,Math.abs(y(b.open)-y(b.close)))+'" class="'+(up?"ic-up-b":"ic-dn-b")+'"><title>'+jst(b.t)+' 始'+yen(b.open)+' 高'+yen(b.high)+' 安'+yen(b.low)+' 終'+yen(b.close)+' 出来高'+yen(b.volume)+'</title></rect>';
     var c=byT[b.t];if(c){var m=c.side==="bottom";var yy=m?y(b.low)+(c.near?16:10):y(b.high)-(c.near?8:4);
       s+='<text x="'+x(i)+'" y="'+yy+'" text-anchor="middle" class="tf-mk '+(c.near?"tf-mk-near":"")+' '+(m?"tf-mk-b":"tf-mk-t")+'">'+(m?"▼":"▲")+'<title>'+jst(b.t)+' クライマックス('+(m?"下落":"上昇")+') 出来高 '+c.volRatio.toFixed(1)+'倍'+(c.near?" 損益分岐付近":"")+'</title></text>'}
-    if(i%Math.ceil(bars.length/6)===0)s+='<text x="'+x(i)+'" y="'+(H-6)+'" text-anchor="middle">'+jst(b.t)+'</text>'});
+    if(i%Math.ceil(bars.length/(mob?4:6))===0)s+='<text x="'+x(i)+'" y="'+(H-6)+'" text-anchor="middle">'+(mob&&d.tf!=="60m"?jst(b.t).split(" ")[1]:jst(b.t))+'</text>'});
   if(lv.putLevel!=null&&lv.putLevel>lo&&lv.putLevel<hi)s+='<line x1="'+P+'" x2="'+(W-10)+'" y1="'+y(lv.putLevel)+'" y2="'+y(lv.putLevel)+'" class="tf-lv"/><text x="'+(P+4)+'" y="'+(y(lv.putLevel)-3)+'" class="tf-lv-t">プット損益分岐 '+yen(lv.putLevel)+'</text>';
   if(lv.callLevel!=null&&lv.callLevel>lo&&lv.callLevel<hi)s+='<line x1="'+P+'" x2="'+(W-10)+'" y1="'+y(lv.callLevel)+'" y2="'+y(lv.callLevel)+'" class="tf-lv"/><text x="'+(P+4)+'" y="'+(y(lv.callLevel)-3)+'" class="tf-lv-t">コール損益分岐 '+yen(lv.callLevel)+'</text>';
   var last=bars[bars.length-1];s+='<text x="'+(W-12)+'" y="'+(y(last.close)+4)+'" text-anchor="end" class="tf-last">'+yen(last.close)+'</text>';

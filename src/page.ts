@@ -144,7 +144,7 @@ export function renderPage(opts: {
   <section class="card"><h3>総合スコア推移</h3>${scoreChart(history)}</section>
   ${weeklyReportBlock(opts.weekly, latest)}`;
 
-  return `<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  return wrapWideSvgs(`<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>日経225 OPフロー観測</title>
 <meta name="description" content="JPX公表の投資部門別取引状況から、日経225オプションの個人・法人ポジションを推計し日経平均先物の方向感を週次で分析します。">
 <meta property="og:title" content="日経225 OPフロー観測"><meta property="og:url" content="${esc(opts.siteUrl)}">
@@ -174,6 +174,22 @@ tr.focus td:first-child{font-weight:700}
 svg{width:100%;height:auto}svg text{fill:var(--muted);font-size:11px}.axis{stroke:var(--muted)}.grid{stroke:var(--line);stroke-dasharray:4 4}
 .banner{background:#fff3cd;color:#664d03;border-radius:8px;padding:10px 14px;margin-top:16px;font-size:14px}
 details{font-size:14px}.section-title{font-size:16px;margin:28px 0 0}${DAILY_CSS}${SENTIMENT_CSS}footer{color:var(--muted);font-size:12px}
+.svg-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+/* スマホ: 余白・文字を詰め、グラフは文字が読める幅を保って横スクロール */
+@media(max-width:600px){
+body{font-size:14px}header,main,footer{padding:10px}
+.card{padding:12px;margin:10px 0;border-radius:10px}
+h2{font-size:18px}h3{font-size:15px}h4{margin:16px 0 6px}
+.score{font-size:36px}.kpi{padding:8px}.kpi strong{font-size:17px}
+table{font-size:12px}th,td{padding:6px 4px}
+.contrib li{grid-template-columns:72px 1fr 48px;gap:6px}
+.svg-scroll svg,.tf-chart svg{min-width:620px}.tf-chart{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.tf-tabs{flex-wrap:wrap}.tf-tabs button{padding:6px 12px;font-size:14px}
+.tf-judge td{white-space:normal}.jbar{width:36px}
+.sq-g-head strong{font-size:22px}
+details.explain{padding:8px 10px;font-size:12.5px}
+.banner{font-size:13px}
+}
 </style></head><body>
 <header><h1>日経225 OPフロー観測</h1><p>日経225オプションの建玉(日次)と個人・法人の売買(週次)から日経平均先物の方向感を推計・X自動投稿</p></header>
 <main>${opts.model ? renderModelSection(opts.model.prediction, opts.model.recent, opts.model.logs, opts.model.config, opts.model.tuning) : ""}${renderSentimentSection(opts.sentiment)}${opts.daily ? renderDailySection(opts.daily.latest, opts.daily.history, opts.daily.strikes, opts.daily.squeezeHist ?? [], opts.daily.alertLog ?? [], opts.daily.viHist ?? [], opts.daily.judgeModel ?? null) : ""}${body}
@@ -188,5 +204,12 @@ details{font-size:14px}.section-title{font-size:16px;margin:28px 0 0}${DAILY_CSS
 </main>
 <footer><p>本サイトは公開統計を機械的に処理した参考情報であり、投資助言・売買推奨ではありません。投資判断はご自身の責任で行ってください。出典: 日本取引所グループ。</p>
 <p><a href="/api/latest">API</a></p></footer>
-</body></html>`;
+<script>document.querySelectorAll(".svg-scroll").forEach(function(e){if(e.scrollWidth>e.clientWidth)e.scrollLeft=e.scrollWidth})</script>
+</body></html>`);
+}
+
+/** 横長のグラフ(幅 720)を横スクロールの枠で包む(スマホで文字が潰れないよう最小幅を保つため)。<script> の中は触らない */
+function wrapWideSvgs(html: string): string {
+  return html.split(/(<script[\s\S]*?<\/script>)/).map((part) => part.startsWith("<script") ? part
+    : part.replace(/<svg\b[^>]*viewBox="0 0 720 [^"]*"[\s\S]*?<\/svg>/g, (m) => `<div class="svg-scroll">${m}</div>`)).join("");
 }

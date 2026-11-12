@@ -316,7 +316,7 @@ function draw(d){
   if(lv.putLevel!=null&&lv.putLevel>lo&&lv.putLevel<hi)s+='<line x1="'+P+'" x2="'+(W-10)+'" y1="'+y(lv.putLevel)+'" y2="'+y(lv.putLevel)+'" class="tf-lv"/><text x="'+(P+4)+'" y="'+(y(lv.putLevel)-3)+'" class="tf-lv-t">プット損益分岐 '+yen(lv.putLevel)+'</text>';
   if(lv.callLevel!=null&&lv.callLevel>lo&&lv.callLevel<hi)s+='<line x1="'+P+'" x2="'+(W-10)+'" y1="'+y(lv.callLevel)+'" y2="'+y(lv.callLevel)+'" class="tf-lv"/><text x="'+(P+4)+'" y="'+(y(lv.callLevel)-3)+'" class="tf-lv-t">コール損益分岐 '+yen(lv.callLevel)+'</text>';
   var last=bars[bars.length-1];s+='<text x="'+(W-12)+'" y="'+(y(last.close)+4)+'" text-anchor="end" class="tf-last">'+yen(last.close)+'</text>';
-  s+='</svg>';el.innerHTML=s;
+  s+='</svg>';el.innerHTML=s;el.scrollLeft=el.scrollWidth;
   st.textContent=(d.source==="mt5"?"XS MT5 "+d.symbol+"(リアルタイム) ":"CME "+d.symbol+"(Yahoo・遅延あり) ")+d.label+" 最新 "+jst(last.t)+" "+yen(last.close)+lvTxt("put",lv.putLevel,last.close)+lvTxt("call",lv.callLevel,last.close);
 }
 var VL={capitulation:"投げ→反転含み",reversal:"反転の兆し",breakout:"ブレイク優勢",undecided:"判定保留"};
@@ -447,16 +447,7 @@ details.explain dd p{margin:2px 0}details.explain .today{color:var(--fg);backgro
 svg text.tf-mk{font-size:9px}svg text.tf-mk-near{font-size:15px;font-weight:700}svg text.tf-mk-b{fill:#22c55e}svg text.tf-mk-t{fill:#ef4444}
 .ic-up{stroke:var(--up)}.ic-dn{stroke:var(--down)}.ic-up-b{fill:var(--up)}.ic-dn-b{fill:var(--down)}
 .sq-hot{color:#dc2626!important;font-weight:700}.sq-calm{color:#16a34a!important}
-.sq-wrap{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:10px 0}@media(max-width:720px){details.explain{margin:10px 0;padding:8px 12px;border:1px solid var(--line,#8883);border-radius:10px;font-size:13px;line-height:1.7}
-details.explain summary{cursor:pointer;font-weight:700}details.explain dt{font-weight:700;margin-top:10px}details.explain dd{margin:2px 0 0 0}
-details.explain dd p{margin:2px 0}details.explain .today{color:var(--fg);background:#8881;border-radius:6px;padding:2px 6px}
-.vi-line{fill:none;stroke:#d946ef;stroke-width:2}.vi-nk{fill:none;stroke:var(--muted);stroke-width:1;stroke-dasharray:3 3}.vi-dot{fill:#d946ef}svg text.vi-t,svg tspan.vi-t{fill:#d946ef}svg tspan.vi-nk-t{fill:var(--muted)}
-.tf-tabs{display:flex;gap:6px;align-items:center;margin:8px 0}.tf-tabs button{border:1px solid #8886;background:transparent;color:var(--fg);padding:4px 10px;border-radius:6px;cursor:pointer;font-size:13px}.tf-tabs button.on{background:#0ea5e9;border-color:#0ea5e9;color:#fff}
-.tf-chart svg{width:100%;height:auto}.tf-vu{fill:var(--up);opacity:.35}.tf-vd{fill:var(--down);opacity:.35}.tf-lv{stroke:#eab308;stroke-dasharray:6 3;stroke-width:1.2}svg text.tf-lv-t{fill:#eab308;font-size:10px}svg text.tf-last{fill:var(--fg);font-size:11px;font-weight:700}.jbar{display:inline-block;width:60px;height:6px;background:var(--grid,#8883);border-radius:3px;margin:0 4px;vertical-align:middle;overflow:hidden}.jbar span{display:block;height:100%;background:#eab308}.tf-judge table th{text-align:left;white-space:nowrap}
-svg text.tf-mk{font-size:9px}svg text.tf-mk-near{font-size:15px;font-weight:700}svg text.tf-mk-b{fill:#22c55e}svg text.tf-mk-t{fill:#ef4444}
-.ic-up{stroke:var(--up)}.ic-dn{stroke:var(--down)}.ic-up-b{fill:var(--up)}.ic-dn-b{fill:var(--down)}
-.sq-hot{color:#dc2626!important;font-weight:700}.sq-calm{color:#16a34a!important}
-.sq-wrap{grid-template-columns:1fr}}
+.sq-wrap{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:10px 0}@media(max-width:720px){.sq-wrap{grid-template-columns:1fr}}
 .sq-g{border:1px solid var(--line,#8883);border-radius:10px;padding:10px 12px}.sq-g-head{display:flex;align-items:baseline;gap:8px}.sq-g-head span{font-size:13px;flex:1}
 .sq-g-head strong{font-size:28px}.sq-g-head em{font-style:normal;font-size:13px;color:var(--muted)}
 .sq-track{position:relative;height:8px;border-radius:4px;margin:8px 0 4px;background:linear-gradient(90deg,#16a34a,#a3a3a3 50%,#f59e0b 70%,#dc2626)}

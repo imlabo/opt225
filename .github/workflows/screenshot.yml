@@ -1,0 +1,30 @@
+name: Mobile screenshot
+# サイトをスマホ幅で撮影して、表示崩れを確認する(手動実行)
+on:
+  workflow_dispatch:
+jobs:
+  shot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: npm i --no-save playwright@1.48.2 && npx playwright install --with-deps chromium
+      - name: Capture
+        env:
+          SITE_URL_VAR: ${{ vars.SITE_URL }}
+        run: |
+          export SITE_URL="${SITE_URL_VAR:-$(grep -Eo 'SITE_URL = "[^"]+"' wrangler.toml | cut -d'"' -f2)}"
+          node -e '
+          const { chromium, devices } = require("playwright");
+          (async () => {
+            const b = await chromium.launch();
+            const p = await b.newPage({ ...devices["iPhone 13"] });
+            await p.goto(process.env.SITE_URL + "/?shot=" + Date.now(), { waitUntil: "networkidle" });
+            await p.waitForTimeout(3000);
+            const over = await p.evaluate(() => [...document.querySelectorAll("body *")].filter((e) => e.getBoundingClientRect().right > innerWidth + 1 && !e.closest(".svg-scroll,.table-wrap,.tf-chart")).slice(0, 15).map((e) => e.tagName + "." + e.className + " " + Math.round(e.getBoundingClientRect().right)));
+            console.log("page width", await p.evaluate(() => document.documentElement.scrollWidth), "viewport", p.viewportSize().width);
+            console.log("overflowing:", JSON.stringify(over, null, 1));
+            await p.screenshot({ path: "mobile.png", fullPage: true });
+            await b.close();
+          })();'
+      - uses: actions/upload-artifact@v4
+        with: { name: mobile, path: mobile.png }

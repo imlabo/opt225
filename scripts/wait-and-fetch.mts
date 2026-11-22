@@ -17,7 +17,6 @@ const deadlineMin = dh * 60 + dm;
 
 const t0 = tokyoNow();
 const today = t0.date;
-if (t0.dow === 0 || t0.dow === 6) { console.log(`${today} is a weekend in Tokyo — nothing to do`); process.exit(0); }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const stamp = () => { const t = tokyoNow(); return `${String(Math.floor(t.minutes / 60)).padStart(2, "0")}:${String(t.minutes % 60).padStart(2, "0")} JST`; };
@@ -49,6 +48,19 @@ function runFetch(label: string): boolean {
   return r.status === 0;
 }
 
+// 0) 取りこぼしの回収: GitHub のスケジュールは数時間遅れることがあり、日付が変わってから起動すると
+//    前営業日の分を取り込めなくなる。JPX に公表済みでサイトより新しい日があれば、曜日・時刻に関係なくまず取り込む
+{
+  const latest = await siteLatest();
+  const d0 = await jpxDates();
+  if (d0.oi && d0.oi === d0.rb && (!latest || d0.oi > latest)) {
+    console.log(`${stamp()} catch-up: JPX has ${d0.oi}, site has ${latest ?? "-"} — ingesting`);
+    runFetch("catch-up");
+    console.log(`::notice title=Daily::catch-up ${d0.oi} → site ${(await siteLatest()) ?? "-"}`);
+  }
+}
+if (t0.dow === 0 || t0.dow === 6) { console.log(`${today} is a weekend in Tokyo — nothing more to do`); process.exit(0); }
+if (t0.minutes < 15 * 60 + 30) { console.log(`${stamp()} before today's close — nothing more to do`); process.exit(0); }
 if ((await siteLatest()) === today) { console.log(`${stamp()} site already has ${today} — done`); process.exit(0); }
 
 // 1) まず 1 回(一目均衡表を引け値で先行更新)

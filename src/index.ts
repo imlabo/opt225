@@ -1,4 +1,4 @@
-import { buildNight, type NightSnap } from "./night";
+import { buildNight, nightWindow, type NightSnap } from "./night";
 import { judgeAt, energyAt, techAt, VERDICT_LABEL, setJudgeModel, judgeAdj, reversalOk, type JudgeModel } from "./technicals";
 import { collectAndResolve, fitJudgeModel, watchFrom, LEARN_EVERY_MS, MAX_SAMPLES, REFIT_MS, current, outcome, type Watch, type Sample } from "./judge-learn";
 import { Hono } from "hono";
@@ -201,6 +201,20 @@ async function runNight(env: Env): Promise<{ ok: boolean; tradeDate?: string; cl
   const hist = ((await loadMeta<NightSnap[]>(env, "night_hist")) ?? []).filter((h) => h.tradeDate !== snap.tradeDate);
   await saveMeta(env, "night_hist", [...hist, snap].slice(-60));
   return { ok: true, tradeDate: snap.tradeDate, close: snap.close, change: Math.round(snap.change) };
+}
+
+/** 最新の日次に対するナイトの結果がまだなく、夜間取引が終わっていれば更新する(30 分に 1 回まで試す) */
+async function maybeNight(env: Env) {
+  const [dl] = (await loadDailyAnalyses(env, 1)).slice(-1);
+  if (!dl) return null;
+  const snap = await loadMeta<NightSnap>(env, "night_snapshot");
+  if (snap?.tradeDate === dl.tradeDate) return null;
+  const [, to] = nightWindow(dl.tradeDate);
+  if (Date.now() < (to + 300) * 1000) return null;
+  const tried = await loadMeta<{ at: number; tradeDate: string }>(env, "night_try");
+  if (tried?.tradeDate === dl.tradeDate && Date.now() - tried.at < 30 * 60 * 1000) return null;
+  await saveMeta(env, "night_try", { at: Date.now(), tradeDate: dl.tradeDate });
+  return runNight(env);
 }
 
 /** MT5 の価格と先物(Yahoo NKD=F)の差: 同じ時刻の 5分足終値の差の中央値。CFD が現物連動でも先物連動でも損益分岐を合わせるため */
@@ -552,10 +566,12 @@ export default {
         if (kind === "weekly") result = JSON.stringify(await runPipeline(env)).slice(0, 200);
         else if (kind === "night") result = JSON.stringify(await runNight(env)).slice(0, 200);
         else if (kind === "alerts") {
+          // ナイトの更新が抜けていたら(日次の取り込みが夜間終了後にずれ込んだ場合など)、ここで補う
+          try { const nr = await maybeNight(env); if (nr) result += `night ${JSON.stringify(nr).slice(0, 80)}; `; } catch (e) { result += `night error ${String(e).slice(0, 60)}; `; }
           // MT5 から足が届いている間は、受信時に判定しているので Cron 側は休む(二重判定を避ける)
           const p = await loadMeta<PushedBars>(env, "mt5_bars_5m");
-          if (p && Date.now() - p.receivedAt < MT5_FRESH_MS) result = "skip (mt5 push active)";
-          else { const r = await runAlerts(env); result = JSON.stringify({ alerts: r.signals.length, sent: r.sent, note: r.note }); }
+          if (p && Date.now() - p.receivedAt < MT5_FRESH_MS) result += "skip (mt5 push active)";
+          else { const r = await runAlerts(env); result += JSON.stringify({ alerts: r.signals.length, sent: r.sent, note: r.note }); }
         }
         else result = JSON.stringify(await dispatchDaily(env));
       } catch (e) {

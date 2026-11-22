@@ -1,3 +1,4 @@
+import type { NightSnap } from "./night";
 import { LEARN_MIN_N, learnWeight, type JudgeModel } from "./technicals";
 import type { DailyAnalysis, DailyStrike } from "./daily";
 import type { AlertLogItem } from "./alerts";
@@ -373,6 +374,27 @@ function viSection(a: DailyAnalysis, hist: ViPoint[]): string {
     <p class="muted small">日経VIは、日経225オプションの価格から計算される「今後1か月の日経平均の予想変動率(年率%)」で、市場の恐怖の度合いを表します。20前後が平常、30を超えると警戒、40を超えるとパニック的な局面です。VIが急上昇した後のピークは、相場の底と重なることが多い一方、上昇が続く間は下げが加速しやすくなります。50日平均からの乖離と前日比を予測モデルの材料に加え、効き方は毎日の自動見直しで判断しています。データは日経公式(日次)。</p>`;
 }
 
+/** ナイトセッション(夜間取引)の結果。日中の建玉から出した損益分岐に、夜間の終値を当てる */
+function nightSection(n: NightSnap | null): string {
+  if (!n) return "";
+  const hm = (t: number) => { const d = new Date((t + 9 * 3600) * 1000); return `${d.getUTCMonth() + 1}/${d.getUTCDate()} ${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`; };
+  const cls = n.change >= 0 ? "up" : "down";
+  const dist = (side: "put" | "call") => {
+    const lvl = side === "put" ? n.putLevel : n.callLevel, d = side === "put" ? n.putDist : n.callDist;
+    if (lvl == null || d == null) return "—";
+    const name = side === "put" ? "プット売り手" : "コール売り手";
+    return d < 0 ? `${name}の損益分岐 ${yen(lvl)} を${side === "put" ? "割れています" : "上抜けています"}(${d.toFixed(2)}%)` : `${name}の損益分岐 ${yen(lvl)} まで あと ${d.toFixed(2)}%`;
+  };
+  const touched = [n.brokePut ? "夜間に一時プット売り手の損益分岐を割り込みました" : "", n.brokeCall ? "夜間に一時コール売り手の損益分岐を上抜けました" : ""].filter(Boolean).join("。");
+  return `<h4>ナイトセッション(${hm(n.from)}〜${hm(n.to)})</h4>
+    <div class="kpis">
+      <div class="kpi"><span>夜間の終値(先物)</span><strong class="${cls}">${yen(n.close)}</strong><small>日中引け ${yen(n.dayClose)} 比 ${signed(n.change)}円(${signed(n.changePct, 2)}%)</small></div>
+      <div class="kpi"><span>夜間の高値 / 安値</span><strong>${yen(n.high)} / ${yen(n.low)}</strong><small>始値 ${yen(n.open)}・値幅 ${yen(n.high - n.low)}円</small></div>
+    </div>
+    <p class="small">${dist("put")}<br>${dist("call")}${touched ? `<br><b>${touched}。</b>` : ""}</p>
+    <p class="muted small">建玉・損益分岐は日中の引け時点のデータ、夜間の価格は ${esc(n.source)} の 15分足です(毎朝 6:05 JST に更新)。</p>`;
+}
+
 /** テクニカル判定の答え合わせと自動調整の状況 */
 function learnSection(m: JudgeModel | null): string {
   const pct = (h: { n: number; hit: number } | undefined) => (h && h.n ? `${Math.round((h.hit / h.n) * 100)}%(${h.hit}/${h.n}件)` : "まだなし");
@@ -402,7 +424,7 @@ function alertsSection(log: AlertLogItem[]): string {
   return `<h4>最近のアラート</h4>${rows ? `<div class="table-wrap"><table><thead><tr><th>時刻(JST)</th><th>種類</th><th>時間足</th><th>内容</th><th>メール</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<p class="muted small">まだアラートはありません。大底・天井候補(出来高を伴う急落・急騰 × 売り手の損益分岐)と、ファーOTM のプット・コールの急騰・急落(前日比 2倍以上/0.5倍以下)が出るとここに載り、メールで通知します。</p>`}`;
 }
 
-export function renderDailySection(a: DailyAnalysis | undefined, history: DailyAnalysis[], strikes: DailyStrike[], squeezeHist: SqueezeHist[] = [], alertLog: AlertLogItem[] = [], viHist: ViPoint[] = [], judgeModel: JudgeModel | null = null): string {
+export function renderDailySection(a: DailyAnalysis | undefined, history: DailyAnalysis[], strikes: DailyStrike[], squeezeHist: SqueezeHist[] = [], alertLog: AlertLogItem[] = [], viHist: ViPoint[] = [], judgeModel: JudgeModel | null = null, night: NightSnap | null = null): string {
   if (!a) return "";
   const m = `${a.front.month.slice(0, 4)}年${Number(a.front.month.slice(4))}月限`;
   const dPcr = a.prev ? a.pcr - a.prev.pcr : null;
@@ -422,6 +444,7 @@ export function renderDailySection(a: DailyAnalysis | undefined, history: DailyA
       ${kpi("SQまでの1σレンジ", range, a.expectedMove ? `±${yen(a.expectedMove)}円` : "")}
     </div>
     <p class="comment">${esc(a.comment)}</p>
+    ${nightSection(night && night.tradeDate === a.tradeDate ? night : null)}
     ${intradaySection(a)}
     ${alertsSection(alertLog)}
     ${learnSection(judgeModel)}

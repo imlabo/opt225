@@ -1,3 +1,4 @@
+import { buildNight, type NightSnap } from "./night";
 import { judgeAt, energyAt, techAt, VERDICT_LABEL, setJudgeModel, judgeAdj, reversalOk, type JudgeModel } from "./technicals";
 import { collectAndResolve, fitJudgeModel, watchFrom, LEARN_EVERY_MS, MAX_SAMPLES, REFIT_MS, current, outcome, type Watch, type Sample } from "./judge-learn";
 import { Hono } from "hono";
@@ -37,13 +38,14 @@ app.get("/", async (c) => {
   const alertLog = (await loadMeta<AlertLogItem[]>(c.env, "alert_log")) ?? [];
   const viHist = (await loadMeta<ViPoint[]>(c.env, "vi_hist")) ?? [];
   const judgeModel = await loadMeta<JudgeModel>(c.env, "judge_model");
+  const night = await loadMeta<NightSnap>(c.env, "night_snapshot");
   const ichimoku = latestIchi && (!dl?.ichimoku || latestIchi.tradeDate > dl.ichimoku.result.date)
     ? { ...latestIchi.ichimoku, basis: dl?.ichimoku?.basis ?? 0 }
     : dl?.ichimoku;
   c.header("Cache-Control", "public, max-age=300");
   return c.html(renderPage({
     latest: history[history.length - 1], history, week: weeks[0], siteUrl: c.env.SITE_URL,
-    daily: { latest: dl, history: dailyHistory, strikes, squeezeHist: squeezeHist ?? [], alertLog, viHist, judgeModel }, ichimoku,
+    daily: { latest: dl, history: dailyHistory, strikes, squeezeHist: squeezeHist ?? [], alertLog, viHist, judgeModel, night }, ichimoku,
     model: { prediction, recent, logs, config: modelConfig ?? DEFAULT_CONFIG, tuning: tuningLog ?? [] },
     weekly: weeklyReport ?? undefined,
     sentiment,
@@ -186,6 +188,19 @@ async function yahooBars(tf: Tf, range: string): Promise<IBar[]> {
   const r = await fetch(`https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(SYMBOL)}?interval=${tf}&range=${range}`, { headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36", Accept: "application/json" } });
   if (!r.ok) throw new Error(`Yahoo HTTP ${r.status}`);
   return parseIntraday(await r.json());
+}
+
+/** ナイトセッション終了後(6:05 JST)に、夜間の値動きと損益分岐までの距離を更新する */
+async function runNight(env: Env): Promise<{ ok: boolean; tradeDate?: string; close?: number; change?: number; note?: string }> {
+  const [dl] = (await loadDailyAnalyses(env, 1)).slice(-1);
+  if (!dl) return { ok: false, note: "no daily analysis" };
+  const bars = await yahooBars("15m", "5d");
+  const snap = buildNight(bars, dl.tradeDate, levelsFrom(dl));
+  if (!snap) return { ok: false, tradeDate: dl.tradeDate, note: "night bars not found" };
+  await saveMeta(env, "night_snapshot", snap);
+  const hist = ((await loadMeta<NightSnap[]>(env, "night_hist")) ?? []).filter((h) => h.tradeDate !== snap.tradeDate);
+  await saveMeta(env, "night_hist", [...hist, snap].slice(-60));
+  return { ok: true, tradeDate: snap.tradeDate, close: snap.close, change: Math.round(snap.change) };
 }
 
 /** MT5 の価格と先物(Yahoo NKD=F)の差: 同じ時刻の 5分足終値の差の中央値。CFD が現物連動でも先物連動でも損益分岐を合わせるため */
@@ -484,6 +499,15 @@ app.get("/api/posts", async (c) => {
   const w = await c.env.DB.prepare("SELECT week_end AS key, tweet_id, text, status, error, posted_at FROM posts ORDER BY week_end DESC LIMIT 3").all();
   return c.json({ daily: d.results, weekly: w.results });
 });
+/** ナイトセッションの更新(手動実行・確認用) */
+app.post("/admin/night-update", async (c) => {
+  if (c.req.header("authorization") !== `Bearer ${c.env.ADMIN_TOKEN}`) return c.json({ error: "unauthorized" }, 401);
+  return c.json(await runNight(c.env));
+});
+app.get("/api/night/:nonce?", async (c) => {
+  c.header("Cache-Control", "no-store");
+  return c.json({ latest: await loadMeta<NightSnap>(c.env, "night_snapshot"), hist: ((await loadMeta<NightSnap[]>(c.env, "night_hist")) ?? []).slice(-10) });
+});
 /** 直近のアラート(キャッシュなし・確認用) */
 app.get("/api/alerts/recent/:nonce?", async (c) => {
   c.header("Cache-Control", "no-store");
@@ -520,12 +544,13 @@ export default {
   async scheduled(ctrl: ScheduledController, env: Env, ctx: ExecutionContext) {
     // 週次(木・金 16:30 JST)は JPX 取得→分析→投稿。毎分はアラート。それ以外(平日 16:40 / 20:10 JST)は GitHub Actions の日次取り込みを起動
     const cron = ctrl.cron ?? "";
-    const kind = /^\*(\/5)?\s/.test(cron) ? "alerts" : /^30 7\b/.test(cron) ? "weekly" : "dispatch";
+    const kind = /^\*(\/5)?\s/.test(cron) ? "alerts" : /^30 7\b/.test(cron) ? "weekly" : /^5 21\b/.test(cron) ? "night" : "dispatch";
     ctx.waitUntil((async () => {
       const log = (await loadMeta<{ cron: string; kind: string; at: number; result?: string }[]>(env, "cron_log")) ?? [];
       let result = "";
       try {
         if (kind === "weekly") result = JSON.stringify(await runPipeline(env)).slice(0, 200);
+        else if (kind === "night") result = JSON.stringify(await runNight(env)).slice(0, 200);
         else if (kind === "alerts") {
           // MT5 から足が届いている間は、受信時に判定しているので Cron 側は休む(二重判定を避ける)
           const p = await loadMeta<PushedBars>(env, "mt5_bars_5m");

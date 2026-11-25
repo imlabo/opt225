@@ -88,7 +88,7 @@ export const tfMinutes = (tf: Tf) => (tf === "5m" ? 5 : tf === "15m" ? 15 : 60);
 export const slotOf = (t: number, tf: Tf) => String(Math.floor((t % 86400) / 60 / tfMinutes(tf)));
 /** 取引の中断(30 分以上の空白)の直後の何本かは判定しない(寄り付きの出来高急増を除外) */
 export const SKIP_AFTER_BREAK = 3;
-const afterBreak = (done: IBar[], idx: number) => {
+export const afterBreak = (done: IBar[], idx: number) => {
   for (let k = 0; k < SKIP_AFTER_BREAK && idx - k - 1 >= 0; k++) if (done[idx - k].t - done[idx - k - 1].t > 30 * 60) return true;
   return false;
 };

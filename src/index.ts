@@ -13,7 +13,7 @@ import { analyzeAndPost, ingestDaily, ingestManual, rebuildSqueeze, runPipeline,
 import { composeAlertTweet, composeFollowTweet } from "./x";
 import type { ViPoint } from "./vi";
 import type { WeeklyReport, WeeklyWeights } from "./weekly-tuning";
-import { COOLDOWN_BY_TF, LOOKBACK, FOLLOW_LABEL, composeFollowMail, detectLevelBreak, followUp, composeMail, detect, levelsFrom, parseIntraday, scanClimax, sendMail, SYMBOL, TIMEFRAMES, type AlertLogItem, type AlertState, type FollowSignal, type IBar, type Levels, type Pending, type Signal, type Tf, type VolProfile } from "./alerts";
+import { COOLDOWN_BY_TF, LOOKBACK, afterBreak, baseVolume, slotOf, FOLLOW_LABEL, composeFollowMail, detectLevelBreak, followUp, composeMail, detect, levelsFrom, parseIntraday, scanClimax, sendMail, SYMBOL, TIMEFRAMES, type AlertLogItem, type AlertState, type FollowSignal, type IBar, type Levels, type Pending, type Signal, type Tf, type VolProfile } from "./alerts";
 import type { SqueezeHist } from "./squeeze";
 import { DEFAULT_CONFIG, type ModelConfig, type TuningReport } from "./tuning";
 import { renderPage } from "./page";
@@ -521,6 +521,26 @@ app.post("/admin/night-update", async (c) => {
 app.get("/api/night/:nonce?", async (c) => {
   c.header("Cache-Control", "no-store");
   return c.json({ latest: await loadMeta<NightSnap>(c.env, "night_snapshot"), hist: ((await loadMeta<NightSnap[]>(c.env, "night_hist")) ?? []).slice(-10) });
+});
+/** 検出の内訳(確認用): 直近の確定足ごとの出来高倍率・値幅倍率・損益分岐との位置 */
+app.get("/api/alerts/debug/:tf/:nonce?", async (c) => {
+  c.header("Cache-Control", "no-store");
+  const tf = (TIMEFRAMES.find((t) => t.tf === c.req.param("tf")) ?? TIMEFRAMES[0]);
+  const src = await getBars(c.env, tf.tf, tf.range);
+  const [dl] = (await loadDailyAnalyses(c.env, 1)).slice(-1);
+  const base = levelsFrom(dl);
+  const lv = base && shiftLevels(base, src.offset);
+  const done = src.bars.filter((b) => b.volume > 0);
+  const rows = [];
+  for (let i = Math.max(LOOKBACK, done.length - 40); i < done.length; i++) {
+    const b = done[i], prev = done.slice(i - LOOKBACK, i);
+    const avg = prev.reduce((s, x) => s + x.volume, 0) / prev.length;
+    const slot = src.profile?.[slotOf(b.t, tf.tf)];
+    const bv = baseVolume(prev, b, tf.tf, src.profile);
+    const ar = prev.reduce((s, x) => s + (x.high - x.low), 0) / prev.length;
+    rows.push({ t: b.t, jst: new Date((b.t + 9 * 3600) * 1000).toISOString().slice(5, 16), o: b.open, h: b.high, l: b.low, c: b.close, v: b.volume, avg20: Math.round(avg), slot: slot ?? null, vr: +(b.volume / bv).toFixed(2), rr: +((b.high - b.low) / ar).toFixed(2), skip: afterBreak(done, i) });
+  }
+  return c.json({ tf: tf.tf, source: src.source, offset: src.offset, levels: lv, now: Date.now(), rows });
 });
 /** 直近のアラート(キャッシュなし・確認用) */
 app.get("/api/alerts/recent/:nonce?", async (c) => {

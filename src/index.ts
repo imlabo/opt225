@@ -13,7 +13,7 @@ import { analyzeAndPost, ingestDaily, ingestManual, rebuildSqueeze, runPipeline,
 import { composeAlertTweet, composeFollowTweet } from "./x";
 import type { ViPoint } from "./vi";
 import type { WeeklyReport, WeeklyWeights } from "./weekly-tuning";
-import { COOLDOWN_BY_TF, LOOKBACK, afterBreak, baseVolume, slotOf, FOLLOW_LABEL, composeFollowMail, detectLevelBreak, followUp, composeMail, detect, levelsFrom, parseIntraday, scanClimax, sendMail, SYMBOL, TIMEFRAMES, type AlertLogItem, type AlertState, type FollowSignal, type IBar, type Levels, type Pending, type Signal, type Tf, type VolProfile } from "./alerts";
+import { COOLDOWN_BY_TF, LOOKBACK, afterBreak, baseVolume, slotOf, tickVolumeSaturated, substituteVolume, FOLLOW_LABEL, composeFollowMail, detectLevelBreak, followUp, composeMail, detect, levelsFrom, parseIntraday, scanClimax, sendMail, SYMBOL, TIMEFRAMES, type AlertLogItem, type AlertState, type FollowSignal, type IBar, type Levels, type Pending, type Signal, type Tf, type VolProfile } from "./alerts";
 import type { SqueezeHist } from "./squeeze";
 import { DEFAULT_CONFIG, type ModelConfig, type TuningReport } from "./tuning";
 import { renderPage } from "./page";
@@ -234,12 +234,25 @@ async function mt5Offset(env: Env, mt5: IBar[]): Promise<number> {
 }
 
 /** 足の取得: MT5 から新しい足が届いていればそれ(リアルタイム)、なければ Yahoo(10〜20 分遅れのことがある) */
-async function getBars(env: Env, tf: Tf, range: string): Promise<{ bars: IBar[]; source: "mt5" | "yahoo"; symbol: string; offset: number; profile?: VolProfile }> {
+async function getBars(env: Env, tf: Tf, range: string): Promise<{ bars: IBar[]; source: "mt5" | "yahoo"; symbol: string; offset: number; profile?: VolProfile; volSource?: "cme" }> {
   const p = await loadMeta<PushedBars>(env, `mt5_bars_${tf}`);
   if (p && Date.now() - p.receivedAt < MT5_FRESH_MS && p.bars.length > LOOKBACK + 2) {
     const m5 = tf === "5m" ? p.bars : (await loadMeta<PushedBars>(env, "mt5_bars_5m"))?.bars ?? p.bars;
+    const offset = await mt5Offset(env, m5);
+    // ティック出来高が頭打ち(どの足も同じ出来高)なら、出来高だけ CME 先物のものに差し替える
+    if (tickVolumeSaturated(p.bars)) {
+      const range = TIMEFRAMES.find((t) => t.tf === tf)!.range;
+      let cached = await loadMeta<{ at: number; bars: IBar[] }>(env, `cme_bars_${tf}`);
+      if (!cached || Date.now() - cached.at > 2 * 60 * 1000) {
+        try { cached = { at: Date.now(), bars: await yahooBars(tf, range) }; await saveMeta(env, `cme_bars_${tf}`, cached); } catch { /* 取れなければ前回分 */ }
+      }
+      if (cached?.bars.length) {
+        const sub = substituteVolume(p.bars, cached.bars);
+        if (sub.matched >= LOOKBACK) return { bars: sub.bars, source: "mt5", symbol: p.symbol, offset, volSource: "cme" };
+      }
+    }
     const profile = (await loadMeta<{ profile: VolProfile }>(env, `mt5_vprof_${tf}`))?.profile;
-    return { bars: p.bars, source: "mt5", symbol: p.symbol, offset: await mt5Offset(env, m5), profile };
+    return { bars: p.bars, source: "mt5", symbol: p.symbol, offset, profile };
   }
   return { bars: await yahooBars(tf, range), source: "yahoo", symbol: SYMBOL, offset: 0 };
 }
@@ -293,6 +306,7 @@ ${env.SITE_URL}`);
         const lvx = shiftLevels(lv, src.offset);
         const d = detect(tf, lab, src.bars, lvx, Date.now(), src.profile);
         if (src.source === "mt5" && !note.includes("mt5")) note += "src mt5; ";
+        if (src.volSource === "cme") note += `${tf} vol=CME; `;
         checked[tf] = d.checked && { t: d.checked.t, close: d.checked.close, volRatio: 0 };
         if (d.signal) {
           signals.push(d.signal);
@@ -540,7 +554,7 @@ app.get("/api/alerts/debug/:tf/:nonce?", async (c) => {
     const ar = prev.reduce((s, x) => s + (x.high - x.low), 0) / prev.length;
     rows.push({ t: b.t, jst: new Date((b.t + 9 * 3600) * 1000).toISOString().slice(5, 16), o: b.open, h: b.high, l: b.low, c: b.close, v: b.volume, avg20: Math.round(avg), slot: slot ?? null, vr: +(b.volume / bv).toFixed(2), rr: +((b.high - b.low) / ar).toFixed(2), skip: afterBreak(done, i) });
   }
-  return c.json({ tf: tf.tf, source: src.source, offset: src.offset, levels: lv, now: Date.now(), rows });
+  return c.json({ tf: tf.tf, source: src.source, volSource: src.volSource ?? "mt5-tick", offset: src.offset, levels: lv, now: Date.now(), rows });
 });
 /** 直近のアラート(キャッシュなし・確認用) */
 app.get("/api/alerts/recent/:nonce?", async (c) => {

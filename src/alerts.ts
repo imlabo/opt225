@@ -387,3 +387,40 @@ export function composeFollowMail(sigs: FollowSignal[], lv: Levels, siteUrl: str
   return { subject, text: `${body}\n\n${why[s0.kind]}\n損益分岐は ${lv.tradeDate} の建玉から計算した値です。\n\n${siteUrl}\n\n※機械的な検出です。投資助言ではありません。` };
 }
 export const followIsDown = isDown;
+
+// ---- MT5 のティック出来高が頭打ちになったときの代わり ----
+
+/**
+ * ティック出来高の頭打ち判定: CFD のティック出来高は「価格の更新回数」なので、相場が荒れて毎回の配信で値が動くと
+ * 配信の上限(5分で約 2,000 回など)に張り付き、どの足も同じ出来高になる(急増を判定できない)。
+ * 直近 60 本の確定足で、ばらつき(変動係数)が 12% 未満なら頭打ちとみなす
+ */
+export function tickVolumeSaturated(bars: IBar[]): boolean {
+  const v = bars.filter((b) => b.volume > 0).slice(-61, -1).map((b) => b.volume);
+  if (v.length < 40) return false;
+  const m = v.reduce((s, x) => s + x, 0) / v.length;
+  const sd = Math.sqrt(v.reduce((s, x) => s + (x - m) ** 2, 0) / v.length);
+  return m > 0 && sd / m < 0.12;
+}
+
+/**
+ * 出来高だけ CME 日経先物(NKD=F)の出来高に差し替える(価格は MT5 のまま)。
+ * CME の足がまだ届いていない直近の足は、「CME の出来高の中央値 × その足の値幅 ÷ 値幅の中央値」で見積もる
+ */
+export function substituteVolume(mt5: IBar[], cme: IBar[]): { bars: IBar[]; matched: number; estimated: number } {
+  const vol = new Map(cme.filter((b) => b.volume > 0).map((b) => [b.t, b.volume] as const));
+  const tr = (b: IBar) => b.high - b.low;
+  const pairs = mt5.filter((b) => vol.has(b.t)).slice(-50);
+  const med = (xs: number[]) => { const s = [...xs].sort((a, b) => a - b); return s.length ? s[Math.floor(s.length / 2)] : 0; };
+  const mv = med(pairs.map((b) => vol.get(b.t)!)), mr = med(pairs.map(tr)) || 1;
+  let matched = 0, estimated = 0;
+  const bars = mt5.map((b) => {
+    if (b.volume <= 0) return b;
+    const v = vol.get(b.t);
+    if (v != null) { matched++; return { ...b, volume: v }; }
+    if (!mv) return b;
+    estimated++;
+    return { ...b, volume: Math.max(1, Math.round((mv * tr(b)) / mr)) };
+  });
+  return { bars, matched, estimated };
+}

@@ -89,3 +89,14 @@ describe("context gates", () => {
     expect(reversalOk(j, 0, { beyond: true }).ok).toBe(false);
   });
 });
+
+describe("notified outcomes", () => {
+  it("tightens with few but bad notified results and marks hits", async () => {
+    const { toNotifyResult } = await import("../src/judge-learn");
+    const mk = (i: number, kind: string, y: Sample["y"]): Sample => ({ tf: "5m", t: i, dir: "down", kind, x: new Array(16).fill(0), cap: 0, rev: 0, con: 0, close: 1, atr: 1, y, at: 0, sent: true });
+    const m = fitJudgeModel([mk(1, "confirm-bottom", "con"), mk(2, "confirm-bottom", "con"), mk(3, "confirm-bottom", "none"), mk(4, "break-down", "con")]);
+    expect(m.adj.confirm).toBeGreaterThan(0); // 3 件全部はずれ → 厳しく
+    expect(toNotifyResult(mk(5, "break-down", "con")).hit).toBe(true);
+    expect(toNotifyResult(mk(6, "confirm-top", "con")).hit).toBe(false);
+  });
+});

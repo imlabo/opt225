@@ -96,25 +96,29 @@ export function collectAndResolve(tf: Tf, bars: IBar[], profile: VolProfile | un
 
 /**
  * 学習: 同じ足(時間足・時刻・向き)は 1 件として、反転・継続それぞれの確率モデルを当てる。
- * 通知の厳しさ: 種類ごとの直近 30 件の当たり率が 55% を下回るほど上乗せ(5 点刻み、最大 20)。10 件未満は 0
+ * 通知の厳しさ: 種類ごとの直近 30 件の当たり率(少ないうちは 55% 寄りに補正)が 55% を下回るほど上乗せ(5 点刻み、最大 20)。3 件から
  */
 export function fitJudgeModel(samples: Sample[], now = Date.now()): JudgeModel {
   const uniq = new Map<string, Sample>();
   for (const s of samples) uniq.set(`${s.tf}:${s.t}:${s.dir}`, s);
   const data = [...uniq.values()].slice(-FIT_ROWS);
-  const rows = data.map((s) => [1, ...s.x]);
+  // 実際に通知した足は、その答え合わせを重く見る(3 倍の重み = 3 回分として学習)
+  const fitData = data.flatMap((s) => (s.sent ? [s, s, s] : [s]));
+  const rows = fitData.map((s) => [1, ...s.x]);
   const d = rows[0]?.length ?? 14;
   const w0 = new Array(d).fill(0);
   const ridge = 2;
-  const wRev = data.length >= LEARN_MIN_N ? fitLogistic(rows, data.map((s) => (s.y === "rev" ? 1 : 0)), w0, ridge) : w0;
-  const wCon = data.length >= LEARN_MIN_N ? fitLogistic(rows, data.map((s) => (s.y === "con" ? 1 : 0)), w0, ridge) : w0;
+  const wRev = data.length >= LEARN_MIN_N ? fitLogistic(rows, fitData.map((s) => (s.y === "rev" ? 1 : 0)), w0, ridge) : w0;
+  const wCon = data.length >= LEARN_MIN_N ? fitLogistic(rows, fitData.map((s) => (s.y === "con" ? 1 : 0)), w0, ridge) : w0;
   const stats: JudgeModel["stats"] = {};
   const adj: JudgeModel["adj"] = { climax: 0, confirm: 0, break: 0 };
   for (const cat of ["climax", "confirm", "break"] as const) {
     const xs = samples.filter((s) => category(s.kind) === cat).slice(-30);
     const hit = xs.filter((s) => s.y === expects(s.kind)).length;
     stats[cat] = { n: xs.length, hit };
-    if (xs.length >= 10) adj[cat] = Math.max(0, Math.min(20, Math.round(((0.55 - hit / xs.length) * 100) / 5) * 5));
+    // 件数が少ないうちは 55% 寄りに見積もる(5 件分の仮の当たり率 55% を足す)。3 件から調整を始める
+    const est = (hit + 0.55 * 5) / (xs.length + 5);
+    if (xs.length >= 3) adj[cat] = Math.max(0, Math.min(20, Math.round(((0.55 - est) * 100) / 5) * 5));
   }
   // 学習用クライマックス全体の、投げ度の代わりの目安(反転率)
   const cl = data.filter((s) => s.kind === "climax");
@@ -125,3 +129,7 @@ export function fitJudgeModel(samples: Sample[], now = Date.now()): JudgeModel {
 
 /** 今の定義のデータだけ残す */
 export const current = <T extends { v?: number }>(xs: T[]) => xs.filter((x) => x.v === JUDGE_VERSION);
+
+/** 通知した予想の答え合わせ(サイトとメールに出す) */
+export interface NotifyResult { tf: Tf; t: number; kind: string; close: number; ext?: number; y: Sample["y"]; hit: boolean; at: number }
+export const toNotifyResult = (s: Sample): NotifyResult => ({ tf: s.tf, t: s.t, kind: s.kind, close: s.close, ext: s.ext, y: s.y, hit: s.y === expects(s.kind), at: s.at });

@@ -1,6 +1,6 @@
 import { buildNight, nightWindow, type NightSnap } from "./night";
 import { judgeAt, energyAt, techAt, VERDICT_LABEL, setJudgeModel, judgeAdj, reversalOk, type JudgeModel } from "./technicals";
-import { collectAndResolve, fitJudgeModel, watchFrom, LEARN_EVERY_MS, MAX_SAMPLES, REFIT_MS, current, outcome, type Watch, type Sample } from "./judge-learn";
+import { collectAndResolve, fitJudgeModel, watchFrom, LEARN_EVERY_MS, MAX_SAMPLES, REFIT_MS, current, outcome, toNotifyResult, type NotifyResult, type Watch, type Sample } from "./judge-learn";
 import { Hono } from "hono";
 import { analyze } from "./analysis";
 import { loadAnalyses, saveAnalysis, loadDailyAnalyses, loadDailyStrikes, loadEvaluated, loadHistory, loadLatestPrediction, loadMeta, loadModelLogs, loadSentiment, saveMeta, saveSentiment, updateDailyIchimoku, type SentimentPayload } from "./db";
@@ -39,13 +39,14 @@ app.get("/", async (c) => {
   const viHist = (await loadMeta<ViPoint[]>(c.env, "vi_hist")) ?? [];
   const judgeModel = await loadMeta<JudgeModel>(c.env, "judge_model");
   const night = await loadMeta<NightSnap>(c.env, "night_snapshot");
+  const notifyResults = (await loadMeta<NotifyResult[]>(c.env, "notify_results")) ?? [];
   const ichimoku = latestIchi && (!dl?.ichimoku || latestIchi.tradeDate > dl.ichimoku.result.date)
     ? { ...latestIchi.ichimoku, basis: dl?.ichimoku?.basis ?? 0 }
     : dl?.ichimoku;
   c.header("Cache-Control", "public, max-age=300");
   return c.html(renderPage({
     latest: history[history.length - 1], history, week: weeks[0], siteUrl: c.env.SITE_URL,
-    daily: { latest: dl, history: dailyHistory, strikes, squeezeHist: squeezeHist ?? [], alertLog, viHist, judgeModel, night }, ichimoku,
+    daily: { latest: dl, history: dailyHistory, strikes, squeezeHist: squeezeHist ?? [], alertLog, viHist, judgeModel, night, notifyResults }, ichimoku,
     model: { prediction, recent, logs, config: modelConfig ?? DEFAULT_CONFIG, tuning: tuningLog ?? [] },
     weekly: weeklyReport ?? undefined,
     sentiment,
@@ -190,6 +191,13 @@ async function yahooBars(tf: Tf, range: string): Promise<IBar[]> {
   return parseIntraday(await r.json());
 }
 
+/** メールの末尾に付ける、通知した予想の直近の当たり率 */
+function trackRecordText(m: JudgeModel | null): string {
+  if (!m) return "";
+  const f = (k: string, name: string) => { const x = m.stats[k]; return x && x.n ? `${name} ${x.hit}/${x.n}件(${Math.round((x.hit / x.n) * 100)}%)` : `${name} まだなし`; };
+  return `\n\n― これまでの通知の答え合わせ(直近30件)―\n${f("climax", "天井・大底候補")}、${f("confirm", "大底・天井確認")}、${f("break", "ブレイク")}\n当たりが悪い種類ほど、通知の条件を自動で厳しくしています。`;
+}
+
 /** ナイトセッション終了後(6:05 JST)に、夜間の値動きと損益分岐までの距離を更新する */
 async function runNight(env: Env): Promise<{ ok: boolean; tradeDate?: string; close?: number; change?: number; note?: string }> {
   const [dl] = (await loadDailyAnalyses(env, 1)).slice(-1);
@@ -263,6 +271,12 @@ const shiftLevels = (lv: Levels, offset: number): Levels => (offset ? { ...lv, p
 /** 天井・大底候補アラート: 先物の 5分/15分/60分足を取得して判定し、該当があればメール */
 async function runAlerts(env: Env, opts: { send?: boolean; force?: boolean } = {}): Promise<{ signals: Signal[]; follows: FollowSignal[]; sent?: boolean; note: string; mail?: unknown }> {
   const send = opts.send ?? true;
+  // 同時に 2 回走る(MT5 の送信と毎分の処理が重なる等)と同じ通知が 2 通届くので、20 秒以内の重複実行は止める
+  if (send && !opts.force) {
+    const lk = await loadMeta<{ at: number }>(env, "alert_lock");
+    if (lk && Date.now() - lk.at < 20 * 1000) return { signals: [], follows: [], note: "skip (another run in progress)" };
+    await saveMeta(env, "alert_lock", { at: Date.now() });
+  }
   const state = (await loadMeta<AlertState>(env, "alert_state")) ?? { lastSent: {} };
   // メール設定が入った最初の実行で、テストメールを 1 通送って疎通を記録する
   if (send && env.RESEND_API_KEY && env.ALERT_TO && !(await loadMeta<unknown>(env, "alert_test_sent"))) {
@@ -281,6 +295,7 @@ ${env.SITE_URL}`);
   const samples = learnNow ? current((await loadMeta<Sample[]>(env, "judge_samples")) ?? []) : [];
   if (model && (model as { v?: number }).v !== 4) { model = null; setJudgeModel(null); } // 定義を変えたので学習し直す
   let newSamples = 0;
+  const notified: NotifyResult[] = [];
   const checked: NonNullable<AlertState["lastRun"]>["checked"] = {};
   let htf: ReturnType<typeof techAt> = null;
   const capMinNow = () => 40 + judgeAdj().climax;
@@ -330,6 +345,7 @@ ${env.SITE_URL}`);
         if (learnNow) {
           const r = collectAndResolve(tf, src.bars, src.profile, watch, samples);
           watch = r.watch; samples.push(...r.resolved); newSamples += r.resolved.length;
+          notified.push(...r.resolved.filter((x) => x.sent).map(toNotifyResult));
         }
       } catch (e) { note += `${tf}: ${String(e).slice(0, 80)}; `; checked[tf] = null; }
     }
@@ -348,6 +364,12 @@ ${env.SITE_URL}`);
   state.pending = pending.slice(-30);
   if (learnNow) {
     state.lastLearn = Date.now();
+    const nr0 = await loadMeta<NotifyResult[]>(env, "notify_results");
+    if (!nr0) notified.unshift(...samples.filter((x) => x.sent && !notified.some((y) => y.t === x.t && y.kind === x.kind)).map(toNotifyResult)); // 初回は過去の通知から作る
+    if (notified.length) {
+      const nr = nr0 ?? [];
+      await saveMeta(env, "notify_results", [...nr, ...notified].slice(-200));
+    }
     const keepS = samples.slice(-MAX_SAMPLES);
     if (newSamples) await saveMeta(env, "judge_samples", keepS);
     // 学習(重い計算)は 1 時間に 1 回まで。Worker の CPU 制限に収めるため直近 FIT_ROWS 件で当てる
@@ -383,6 +405,7 @@ ${env.SITE_URL}`);
     if (!env.RESEND_API_KEY || !env.ALERT_TO) { note += "RESEND_API_KEY/ALERT_TO not set; "; sent = false; }
     else {
       const m = composeMail(fresh, lv, env.SITE_URL);
+      m.text += trackRecordText(model);
       mail = await sendMail(env.RESEND_API_KEY, env.ALERT_TO, m.subject, m.text);
       sent = (mail as { ok: boolean }).ok;
     }
@@ -402,6 +425,7 @@ ${env.SITE_URL}`);
     let ok = false;
     if (env.RESEND_API_KEY && env.ALERT_TO) {
       const m = composeFollowMail(freshF, lv, env.SITE_URL);
+      m.text += trackRecordText(model);
       ok = (await sendMail(env.RESEND_API_KEY, env.ALERT_TO, m.subject, m.text)).ok;
     }
     const tid = await tryTweet(env, composeFollowTweet(freshF));

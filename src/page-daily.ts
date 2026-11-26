@@ -1,3 +1,4 @@
+import type { NotifyResult } from "./judge-learn";
 import type { NightSnap } from "./night";
 import { LEARN_MIN_N, learnWeight, type JudgeModel } from "./technicals";
 import type { DailyAnalysis, DailyStrike } from "./daily";
@@ -395,6 +396,26 @@ function nightSection(n: NightSnap | null): string {
     <p class="muted small">建玉・損益分岐は日中の引け時点のデータ、夜間の価格は ${esc(n.source)} の 15分足です(毎朝 6:05 JST に更新)。</p>`;
 }
 
+/** 通知した予想ひとつひとつの答え合わせ */
+const KIND_JA: Record<string, string> = {
+  "alert-bottom": "大底候補", "alert-top": "天井候補", "confirm-bottom": "大底確認(反発)", "confirm-top": "天井確認(反落)",
+  "break-down": "下落ブレイク(続落)", "break-up": "上昇ブレイク(続伸)", "level-break-down": "下落ブレイク(損益分岐割れ)", "level-break-up": "上昇ブレイク(損益分岐抜け)",
+};
+function notifySection(rs: NotifyResult[]): string {
+  if (!rs.length) return "";
+  const rows = rs.slice(-20).reverse().map((r) => {
+    const d = new Date((r.t + 9 * 3600) * 1000);
+    const when = `${d.getUTCMonth() + 1}/${d.getUTCDate()} ${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
+    const res = r.hit ? '<b class="up">当たり</b>' : r.y === "none" ? '<span class="muted">はっきりせず(はずれ扱い)</span>' : '<b class="down">はずれ</b>';
+    const what = r.y === "rev" ? "反転した" : r.y === "con" ? "そのまま続いた" : "どちらにも大きく動かず";
+    return `<tr><td>${when}</td><td>${r.tf}</td><td>${KIND_JA[r.kind] ?? r.kind}</td><td class="num">${yen(r.close)}</td><td>${what}</td><td>${res}</td></tr>`;
+  }).join("");
+  const n = rs.length, hit = rs.filter((r) => r.hit).length;
+  return `<h4>通知した予想の答え合わせ</h4>
+    <p class="small">これまで ${n} 件中 ${hit} 件当たり(${Math.round((hit / n) * 100)}%)。結果はその後の値動きで自動判定し、当たりが悪い種類ほど通知の条件を自動で厳しくしています(実際に通知した分は学習でも 3 倍の重みで使います)。</p>
+    <div class="table-wrap"><table class="small"><thead><tr><th>足の時刻</th><th>足</th><th>通知</th><th>価格</th><th>その後</th><th>結果</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+
 /** テクニカル判定の答え合わせと自動調整の状況 */
 function learnSection(m: JudgeModel | null): string {
   const pct = (h: { n: number; hit: number } | undefined) => (h && h.n ? `${Math.round((h.hit / h.n) * 100)}%(${h.hit}/${h.n}件)` : "まだなし");
@@ -407,7 +428,7 @@ function learnSection(m: JudgeModel | null): string {
     </tbody></table></div>
     <p class="muted small">学習件数 ${m.n} 件(反転 ${Math.round(m.base.rev * 100)}%・継続 ${Math.round(m.base.con * 100)}%・どちらでもない ${Math.round(m.base.none * 100)}%)。${m.n >= LEARN_MIN_N ? `点数のうち 学習モデル ${Math.round(learnWeight(m.n) * 100)}%・手作りの点数 ${100 - Math.round(learnWeight(m.n) * 100)}% で判定中` : `${LEARN_MIN_N} 件たまるまでは手作りの点数だけで判定`}。最終更新 ${when} JST</p>` : `<p class="muted small">まだ答え合わせのデータがありません。</p>`;
   return `<h4>判定の答え合わせと自動調整</h4>${body}
-    <p class="muted small">判定した足のその後(5分足は6時間・15分足は8時間・60分足は16時間以内)で答え合わせをしています。天井候補なら、その足の高値を更新せずに終値から 0.4%(15分足0.6%・60分足1.0%、かつ平均値幅2本分以上)下げれば「反転(当たり)」、先に高値を 0.2% 以上更新すれば「継続(はずれ)」。大底候補はその逆。小さな押し・戻しだけでは当たりにしません。15分ごとに、分足に出たすべてのクライマックス足と、実際に通知した足を記録・採点し、(1) 反転・継続の確率モデルを学習して点数に混ぜ(件数が増えるほど比重を上げ、最大70%)、(2) 種類ごとの当たり率が55%を下回るほど通知の条件を厳しくします(5点刻み、最大+20。55%以上なら元の基準に戻す)。</p>`;
+    <p class="muted small">判定した足のその後(5分足は6時間・15分足は8時間・60分足は16時間以内)で答え合わせをしています。天井候補なら、その足の高値を更新せずに終値から 0.4%(15分足0.6%・60分足1.0%、かつ平均値幅2本分以上)下げれば「反転(当たり)」、先に高値を 0.2% 以上更新すれば「継続(はずれ)」。大底候補はその逆。小さな押し・戻しだけでは当たりにしません。15分ごとに、分足に出たすべてのクライマックス足と、実際に通知した足を記録・採点し、(1) 反転・継続の確率モデルを学習して点数に混ぜ(件数が増えるほど比重を上げ、最大70%)、(2) 種類ごとの当たり率が55%を下回るほど通知の条件を厳しくします(3件から。件数が少ないうちは55%寄りに補正、5点刻み・最大+20。55%以上なら元の基準に戻す)。</p>`;
 }
 
 /** 最近のアラート */
@@ -424,7 +445,7 @@ function alertsSection(log: AlertLogItem[]): string {
   return `<h4>最近のアラート</h4>${rows ? `<div class="table-wrap"><table><thead><tr><th>時刻(JST)</th><th>種類</th><th>時間足</th><th>内容</th><th>メール</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<p class="muted small">まだアラートはありません。大底・天井候補(出来高を伴う急落・急騰 × 売り手の損益分岐)と、ファーOTM のプット・コールの急騰・急落(前日比 2倍以上/0.5倍以下)が出るとここに載り、メールで通知します。</p>`}`;
 }
 
-export function renderDailySection(a: DailyAnalysis | undefined, history: DailyAnalysis[], strikes: DailyStrike[], squeezeHist: SqueezeHist[] = [], alertLog: AlertLogItem[] = [], viHist: ViPoint[] = [], judgeModel: JudgeModel | null = null, night: NightSnap | null = null): string {
+export function renderDailySection(a: DailyAnalysis | undefined, history: DailyAnalysis[], strikes: DailyStrike[], squeezeHist: SqueezeHist[] = [], alertLog: AlertLogItem[] = [], viHist: ViPoint[] = [], judgeModel: JudgeModel | null = null, night: NightSnap | null = null, notifyResults: NotifyResult[] = []): string {
   if (!a) return "";
   const m = `${a.front.month.slice(0, 4)}年${Number(a.front.month.slice(4))}月限`;
   const dPcr = a.prev ? a.pcr - a.prev.pcr : null;
@@ -448,6 +469,7 @@ export function renderDailySection(a: DailyAnalysis | undefined, history: DailyA
     ${intradaySection(a)}
     ${alertsSection(alertLog)}
     ${learnSection(judgeModel)}
+    ${notifySection(notifyResults)}
     ${viSection(a, viHist)}
     <h4>行使価格別 建玉(${esc(m)}, 500円刻み)</h4>
     ${oiChart(a, strikes)}
